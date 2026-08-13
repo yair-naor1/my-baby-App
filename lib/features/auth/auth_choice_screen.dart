@@ -17,37 +17,36 @@ class AuthChoiceScreen extends StatelessWidget {
             children: [
               const Text(
                 'My First App',
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 40),
-
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const LoginScreen(),
-                    ),
-                  );
-                },
-                child: const Text('Log In'),
+              SizedBox(
+                width: 220,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    );
+                  },
+                  child: const Text('Log In'),
+                ),
               ),
 
               const SizedBox(height: 16),
 
-              OutlinedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const SignupScreen(),
-                    ),
-                  );
-                },
-                child: const Text('Create Account'),
+              SizedBox(
+                width: 220,
+                height: 50,
+                child: OutlinedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SignupScreen()),
+                    );
+                  },
+                  child: const Text('Create Account'),
+                ),
               ),
             ],
           ),
