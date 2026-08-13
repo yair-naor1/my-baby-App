@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "761925234385",
+    "project_id": "my-baby-app-dev",
+    "storage_bucket": "my-baby-app-dev.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:761925234385:android:b1c794a7acd280fbad5ff0",
+        "android_client_info": {
+          "package_name": "com.example.my_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCl5APQmrpY4zG3CEbSVy80KZ4yi5HYaEA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
