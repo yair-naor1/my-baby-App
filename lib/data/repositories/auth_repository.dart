@@ -30,20 +30,15 @@ class AuthRepository {
       createdAt: DateTime.now(),
     );
 
-    await _firestore
-        .collection('users')
-        .doc(appUser.uid)
-        .set(appUser.toMap());
+    await _firestore.collection('users').doc(appUser.uid).set(appUser.toMap());
 
     return appUser;
   }
+
   Future<UserCredential> login({
     required String email,
     required String password,
-      }) async {
-        return _auth.signInWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
-}
+  }) async {
+    return _auth.signInWithEmailAndPassword(email: email, password: password);
+  }
 }

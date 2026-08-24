@@ -36,6 +36,48 @@ class MemoryRepository {
     });
   }
 
+  Future<void> updateMemory({
+    required String bookId,
+    required String memoryId,
+    required String text,
+    required DateTime memoryDate,
+  }) async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      throw Exception('User is not logged in');
+    }
+
+    await _firestore
+        .collection('books')
+        .doc(bookId)
+        .collection('memories')
+        .doc(memoryId)
+        .update({
+          'text': text,
+          'memoryDate': memoryDate,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+  }
+
+  Future<void> deleteMemory({
+    required String bookId,
+    required String memoryId,
+  }) async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      throw Exception('User is not logged in');
+    }
+
+    await _firestore
+        .collection('books')
+        .doc(bookId)
+        .collection('memories')
+        .doc(memoryId)
+        .delete();
+  }
+
   Stream<List<Memory>> watchMemories(String bookId) {
     return _firestore
         .collection('books')
@@ -44,22 +86,22 @@ class MemoryRepository {
         .orderBy('memoryDate')
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
+          return snapshot.docs.map((doc) {
+            final data = doc.data();
 
-        return Memory(
-          memoryId: doc.id,
-          memoryDate: (data['memoryDate'] as Timestamp).toDate(),
-          text: data['text'] as String? ?? '',
-          photoRefs: List<String>.from(data['photoRefs'] ?? []),
-          createdBy: data['createdBy'] as String,
-          createdAt:
-              (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-          updatedAt:
-              (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-          hiddenFromBook: data['hiddenFromBook'] as bool? ?? false,
-        );
-      }).toList();
-    });
+            return Memory(
+              memoryId: doc.id,
+              memoryDate: (data['memoryDate'] as Timestamp).toDate(),
+              text: data['text'] as String? ?? '',
+              photoRefs: List<String>.from(data['photoRefs'] ?? []),
+              createdBy: data['createdBy'] as String,
+              createdAt:
+                  (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+              updatedAt:
+                  (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+              hiddenFromBook: data['hiddenFromBook'] as bool? ?? false,
+            );
+          }).toList();
+        });
   }
 }

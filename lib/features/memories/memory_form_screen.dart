@@ -1,20 +1,21 @@
 import 'package:flutter/material.dart';
 
 import '../../data/repositories/memory_repository.dart';
+import '../../models/memory.dart';
 
-class AddMemoryScreen extends StatefulWidget {
+class MemoryFormScreen extends StatefulWidget {
   final String bookId;
+  final Memory? memory;
 
-  const AddMemoryScreen({
-    super.key,
-    required this.bookId,
-  });
+  const MemoryFormScreen({super.key, required this.bookId, this.memory});
+
+  bool get isEditing => memory != null;
 
   @override
-  State<AddMemoryScreen> createState() => _AddMemoryScreenState();
+  State<MemoryFormScreen> createState() => _MemoryFormScreenState();
 }
 
-class _AddMemoryScreenState extends State<AddMemoryScreen> {
+class _MemoryFormScreenState extends State<MemoryFormScreen> {
   final _textController = TextEditingController();
   final _memoryRepository = MemoryRepository();
 
@@ -22,11 +23,21 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   bool _isLoading = false;
   String? _errorMessage;
 
+  @override
+  void initState() {
+    super.initState();
+
+    if (widget.memory != null) {
+      _textController.text = widget.memory!.text;
+      _memoryDate = widget.memory!.memoryDate;
+    }
+  }
+
   Future<void> _selectDate() async {
     final selectedDate = await showDatePicker(
       context: context,
       initialDate: _memoryDate ?? DateTime.now(),
-      firstDate: DateTime(2000),
+      firstDate: DateTime(1900),
       lastDate: DateTime.now(),
     );
 
@@ -53,11 +64,20 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     });
 
     try {
-      await _memoryRepository.createMemory(
-        bookId: widget.bookId,
-        text: text,
-        memoryDate: _memoryDate,
-      );
+      if (widget.isEditing) {
+        await _memoryRepository.updateMemory(
+          bookId: widget.bookId,
+          memoryId: widget.memory!.memoryId,
+          text: text,
+          memoryDate: _memoryDate!,
+        );
+      } else {
+        await _memoryRepository.createMemory(
+          bookId: widget.bookId,
+          text: text,
+          memoryDate: _memoryDate,
+        );
+      }
 
       if (!mounted) return;
       Navigator.pop(context);
@@ -86,7 +106,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Add Memory'),
+        title: Text(widget.isEditing ? 'Edit Memory' : 'Add Memory'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(24),
@@ -100,35 +120,29 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                 alignLabelWithHint: true,
               ),
             ),
-
             const SizedBox(height: 20),
-
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: Text(
                 _memoryDate == null
                     ? 'Date: Today'
-                    : 'Date: ${_memoryDate!.day}/${_memoryDate!.month}/${_memoryDate!.year}',
+                    : 'Date: ${_memoryDate!.day}/'
+                          '${_memoryDate!.month}/'
+                          '${_memoryDate!.year}',
               ),
               trailing: const Icon(Icons.calendar_today),
               onTap: _selectDate,
             ),
-
             if (_errorMessage != null)
-              Text(
-                _errorMessage!,
-                style: const TextStyle(color: Colors.red),
-              ),
-
+              Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
             const SizedBox(height: 24),
-
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _saveMemory,
                 child: _isLoading
                     ? const CircularProgressIndicator()
-                    : const Text('Save Memory'),
+                    : Text(widget.isEditing ? 'Save Changes' : 'Save Memory'),
               ),
             ),
           ],

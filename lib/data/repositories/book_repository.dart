@@ -41,25 +41,23 @@ class BookRepository {
         .where('ownerIds', arrayContains: user.uid)
         .snapshots()
         .map((snapshot) {
-      final books = snapshot.docs.map((doc) {
-        final data = doc.data();
+          final books = snapshot.docs.map((doc) {
+            final data = doc.data();
 
-        return Book(
-          bookId: doc.id,
-          childName: data['childName'] as String,
-          birthDate: (data['birthDate'] as Timestamp).toDate(),
-          ownerIds: List<String>.from(data['ownerIds']),
-          language: data['language'] as String? ?? 'en',
-          createdAt:
-              (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-        );
-      }).toList();
+            return Book(
+              bookId: doc.id,
+              childName: data['childName'] as String,
+              birthDate: (data['birthDate'] as Timestamp).toDate(),
+              ownerIds: List<String>.from(data['ownerIds']),
+              language: data['language'] as String? ?? 'en',
+              createdAt:
+                  (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+            );
+          }).toList();
 
-      books.sort(
-        (a, b) => a.createdAt.compareTo(b.createdAt),
-      );
+          books.sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
-      return books;
-    });
+          return books;
+        });
   }
 }

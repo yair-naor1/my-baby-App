@@ -80,18 +80,14 @@ class _CreateBookScreenState extends State<CreateBookScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Create Book'),
-      ),
+      appBar: AppBar(title: const Text('Create Book')),
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
             TextField(
               controller: _childNameController,
-              decoration: const InputDecoration(
-                labelText: "Child's name",
-              ),
+              decoration: const InputDecoration(labelText: "Child's name"),
             ),
 
             const SizedBox(height: 24),
@@ -108,10 +104,7 @@ class _CreateBookScreenState extends State<CreateBookScreen> {
             ),
 
             if (_errorMessage != null)
-              Text(
-                _errorMessage!,
-                style: const TextStyle(color: Colors.red),
-              ),
+              Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
 
             const SizedBox(height: 24),
 

@@ -6,27 +6,45 @@ import '../../models/book.dart';
 import '../books/create_book_screen.dart';
 import '../books/book_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final _bookRepository = BookRepository();
+  late final _booksStream = _bookRepository.watchMyBooks();
+
   Future<void> _logout() async {
-    await FirebaseAuth.instance.signOut();
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not log out. Please try again.')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final bookRepository = BookRepository();
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Baby Book'),
         actions: [
-          IconButton(onPressed: _logout, icon: const Icon(Icons.logout)),
+          IconButton(
+            onPressed: _logout,
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+          ),
         ],
       ),
 
       body: StreamBuilder<List<Book>>(
-        stream: bookRepository.watchMyBooks(),
+        stream: _booksStream,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -54,6 +72,7 @@ class HomeScreen extends StatelessWidget {
               final book = books[index];
 
               return Card(
+                key: ValueKey(book.bookId),
                 child: ListTile(
                   title: Text(book.childName),
                   subtitle: Text(
