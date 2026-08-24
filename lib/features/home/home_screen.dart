@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../data/repositories/book_repository.dart';
 import '../../models/book.dart';
 import '../books/create_book_screen.dart';
+import '../books/book_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -20,10 +21,7 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Baby Book'),
         actions: [
-          IconButton(
-            onPressed: _logout,
-            icon: const Icon(Icons.logout),
-          ),
+          IconButton(onPressed: _logout, icon: const Icon(Icons.logout)),
         ],
       ),
 
@@ -31,15 +29,11 @@ class HomeScreen extends StatelessWidget {
         stream: bookRepository.watchMyBooks(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
+            return const Center(child: CircularProgressIndicator());
           }
 
           if (snapshot.hasError) {
-            return Center(
-              child: Text('Error: ${snapshot.error}'),
-            );
+            return Center(child: Text('Error: ${snapshot.error}'));
           }
 
           final books = snapshot.data ?? [];
@@ -69,7 +63,10 @@ class HomeScreen extends StatelessWidget {
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
-                    // Next step: open the Book timeline.
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => BookScreen(book: book)),
+                    );
                   },
                 ),
               );
@@ -82,9 +79,7 @@ class HomeScreen extends StatelessWidget {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(
-              builder: (_) => const CreateBookScreen(),
-            ),
+            MaterialPageRoute(builder: (_) => const CreateBookScreen()),
           );
         },
         child: const Icon(Icons.add),
