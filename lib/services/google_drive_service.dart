@@ -24,6 +24,53 @@ class GoogleDriveService {
     );
   }
 
+  Future<void> clearSession() async {
+    await _ensureInitialized();
+
+    await _googleSignIn.signOut();
+    _currentAccount = null;
+  }
+
+  Future<void> deleteUploadedPhotos(List<PhotoReference> photos) async {
+    if (photos.isEmpty) return;
+
+    final account = await connect();
+
+    var authorization = await account.authorizationClient
+        .authorizationForScopes(_scopes);
+
+    authorization ??= await account.authorizationClient.authorizeScopes(
+      _scopes,
+    );
+
+    final client = authorization.authClient(scopes: _scopes);
+
+    final driveApi = drive.DriveApi(client);
+
+    try {
+      for (final photo in photos) {
+        await _tryDeleteDriveFile(driveApi, photo.thumbnailFileId);
+
+        await _tryDeleteDriveFile(driveApi, photo.originalFileId);
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> _tryDeleteDriveFile(
+    drive.DriveApi driveApi,
+    String? fileId,
+  ) async {
+    if (fileId == null) return;
+
+    try {
+      await driveApi.files.delete(fileId);
+    } catch (_) {
+      // Cleanup failure should not hide the original upload error.
+    }
+  }
+
   Future<Uint8List> downloadPhoto(String fileId) async {
     final account = await connect();
 
@@ -181,7 +228,8 @@ class GoogleDriveService {
 
     final client = authorization.authClient(scopes: _scopes);
     final driveApi = drive.DriveApi(client);
-
+    String? originalFileId;
+    String? thumbnailFileId;
     try {
       final bookFolderId = await _getOrCreateBookFolder(driveApi, bookId);
 
@@ -207,6 +255,8 @@ class GoogleDriveService {
       if (uploadedOriginal.id == null) {
         throw Exception('Google Drive did not return an original file ID');
       }
+
+      originalFileId = uploadedOriginal.id;
 
       // ---- Create thumbnail ----
 
@@ -250,12 +300,20 @@ class GoogleDriveService {
         throw Exception('Google Drive did not return a thumbnail file ID');
       }
 
+      thumbnailFileId = uploadedThumbnail.id;
+
       return PhotoReference(
         provider: 'googleDrive',
         originalFileId: uploadedOriginal.id!,
         thumbnailFileId: uploadedThumbnail.id!,
         ownerUid: firebaseUser.uid,
       );
+    } catch (e) {
+      await _tryDeleteDriveFile(driveApi, thumbnailFileId);
+
+      await _tryDeleteDriveFile(driveApi, originalFileId);
+
+      rethrow;
     } finally {
       client.close();
     }

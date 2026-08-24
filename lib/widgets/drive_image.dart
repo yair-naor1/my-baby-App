@@ -25,12 +25,21 @@ class DriveImage extends StatefulWidget {
 class _DriveImageState extends State<DriveImage> {
   final _driveService = GoogleDriveService();
 
-  late final Future<Uint8List> _imageFuture;
+  late Future<Uint8List> _imageFuture;
 
   @override
   void initState() {
     super.initState();
     _imageFuture = _driveService.downloadPhoto(widget.fileId);
+  }
+
+  @override
+  void didUpdateWidget(covariant DriveImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.fileId != widget.fileId) {
+      _imageFuture = _driveService.downloadPhoto(widget.fileId);
+    }
   }
 
   @override

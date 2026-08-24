@@ -259,10 +259,9 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
       _isLoading = true;
       _errorMessage = null;
     });
+    final uploadedPhotos = <PhotoReference>[];
 
     try {
-      final uploadedPhotos = <PhotoReference>[];
-
       for (var i = 0; i < _newPhotos.length; i++) {
         final photo = _newPhotos[i];
 
@@ -357,6 +356,7 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(12),
                         child: DriveImage(
+                          key: ValueKey(photo.originalFileId),
                           fileId: photo.originalFileId,
                           width: double.infinity,
                           fit: BoxFit.fitWidth,

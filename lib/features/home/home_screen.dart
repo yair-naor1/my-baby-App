@@ -5,6 +5,7 @@ import '../../data/repositories/book_repository.dart';
 import '../../models/book.dart';
 import '../books/create_book_screen.dart';
 import '../books/book_screen.dart';
+import '../../services/google_drive_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,10 +16,12 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _bookRepository = BookRepository();
+  final _googleDriveService = GoogleDriveService();
   late final _booksStream = _bookRepository.watchMyBooks();
 
   Future<void> _logout() async {
     try {
+      await _googleDriveService.clearSession();
       await FirebaseAuth.instance.signOut();
     } catch (e) {
       if (!mounted) return;
