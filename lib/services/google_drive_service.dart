@@ -5,6 +5,7 @@ import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/photo_reference.dart';
 import 'package:image/image.dart' as img;
+import 'dart:typed_data';
 
 class GoogleDriveService {
   static const _serverClientId =
@@ -12,15 +13,55 @@ class GoogleDriveService {
 
   static const _scopes = <String>['https://www.googleapis.com/auth/drive.file'];
 
-  final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
+  static final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
 
-  bool _initialized = false;
+  static Future<void>? _initialization;
+  static GoogleSignInAccount? _currentAccount;
 
-  Future<GoogleSignInAccount> connect() async {
-    if (!_initialized) {
-      await _googleSignIn.initialize(serverClientId: _serverClientId);
-      _initialized = true;
+  Future<void> _ensureInitialized() {
+    return _initialization ??= _googleSignIn.initialize(
+      serverClientId: _serverClientId,
+    );
+  }
+
+  Future<Uint8List> downloadPhoto(String fileId) async {
+    final account = await connect();
+
+    var authorization = await account.authorizationClient
+        .authorizationForScopes(_scopes);
+
+    authorization ??= await account.authorizationClient.authorizeScopes(
+      _scopes,
+    );
+
+    final client = authorization.authClient(scopes: _scopes);
+    final driveApi = drive.DriveApi(client);
+
+    try {
+      final media =
+          await driveApi.files.get(
+                fileId,
+                downloadOptions: drive.DownloadOptions.fullMedia,
+              )
+              as drive.Media;
+
+      final bytes = <int>[];
+
+      await for (final chunk in media.stream) {
+        bytes.addAll(chunk);
+      }
+
+      return Uint8List.fromList(bytes);
+    } finally {
+      client.close();
     }
+  }
+
+  Future<GoogleSignInAccount> changeAccount() async {
+    await _ensureInitialized();
+
+    await _googleSignIn.signOut();
+    _currentAccount = null;
 
     final account = await _googleSignIn.authenticate(scopeHint: _scopes);
 
@@ -30,6 +71,35 @@ class GoogleDriveService {
     authorization ??= await account.authorizationClient.authorizeScopes(
       _scopes,
     );
+
+    _currentAccount = account;
+
+    return account;
+  }
+
+  Future<GoogleSignInAccount> connect() async {
+    await _ensureInitialized();
+
+    var account = _currentAccount;
+
+    if (account == null) {
+      final lightweightAuth = _googleSignIn.attemptLightweightAuthentication();
+
+      if (lightweightAuth != null) {
+        account = await lightweightAuth;
+      }
+    }
+
+    account ??= await _googleSignIn.authenticate(scopeHint: _scopes);
+
+    var authorization = await account.authorizationClient
+        .authorizationForScopes(_scopes);
+
+    authorization ??= await account.authorizationClient.authorizeScopes(
+      _scopes,
+    );
+
+    _currentAccount = account;
 
     return account;
   }

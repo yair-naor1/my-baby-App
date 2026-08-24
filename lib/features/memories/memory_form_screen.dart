@@ -6,6 +6,9 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../../models/photo_reference.dart';
 import '../../services/google_drive_service.dart';
+import '../../widgets/drive_image.dart';
+
+enum _ExitChoice { keepEditing, saveAndExit, exitWithoutSaving }
 
 class MemoryFormScreen extends StatefulWidget {
   final String bookId;
@@ -26,6 +29,11 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
   final List<XFile> _newPhotos = [];
   final List<PhotoReference> _existingPhotos = [];
   final _memoryRepository = MemoryRepository();
+  late String _initialText;
+  late DateTime _initialDate;
+  late List<String> _initialPhotoIds;
+
+  bool _allowPop = false;
 
   DateTime? _memoryDate;
   bool _isLoading = false;
@@ -40,6 +48,176 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
       _memoryDate = widget.memory!.memoryDate;
       _existingPhotos.addAll(widget.memory!.photoRefs);
     }
+    _initialText = _textController.text.trim();
+    _initialDate = widget.memory?.memoryDate ?? DateTime.now();
+    _initialPhotoIds = _existingPhotos
+        .map((photo) => photo.originalFileId)
+        .toList();
+  }
+
+  Future<void> _deleteMemory() async {
+    if (!widget.isEditing || _isLoading) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Delete memory?'),
+          content: const Text(
+            'This memory will be permanently removed from the book.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _memoryRepository.deleteMemory(
+        bookId: widget.bookId,
+        memoryId: widget.memory!.memoryId,
+      );
+
+      if (!mounted) return;
+
+      _popWithoutCheck();
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _errorMessage = 'Could not delete memory: $e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleExit() async {
+    if (_isLoading) return;
+
+    if (!_hasUnsavedChanges) {
+      _popWithoutCheck();
+      return;
+    }
+
+    final choice = await showDialog<_ExitChoice>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Unsaved changes'),
+          content: const Text(
+            'You have unsaved changes. Are you sure you want to exit?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, _ExitChoice.keepEditing);
+              },
+              child: const Text('Keep Editing'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, _ExitChoice.exitWithoutSaving);
+              },
+              child: const Text('Exit Without Saving'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(context, _ExitChoice.saveAndExit);
+              },
+              child: const Text('Save and Exit'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted) return;
+
+    switch (choice) {
+      case _ExitChoice.saveAndExit:
+        final saved = await _saveMemory(exitAfterSave: false);
+
+        if (saved) {
+          _popWithoutCheck();
+        }
+        return;
+
+      case _ExitChoice.exitWithoutSaving:
+        _popWithoutCheck();
+        return;
+
+      case _ExitChoice.keepEditing:
+      case null:
+        return;
+    }
+  }
+
+  void _popWithoutCheck() {
+    if (!mounted) return;
+
+    setState(() {
+      _allowPop = true;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    });
+  }
+
+  bool get _hasUnsavedChanges {
+    if (_textController.text.trim() != _initialText) {
+      return true;
+    }
+
+    final currentDate = _memoryDate ?? _initialDate;
+
+    if (currentDate.year != _initialDate.year ||
+        currentDate.month != _initialDate.month ||
+        currentDate.day != _initialDate.day) {
+      return true;
+    }
+
+    if (_newPhotos.isNotEmpty) {
+      return true;
+    }
+
+    final currentPhotoIds = _existingPhotos
+        .map((photo) => photo.originalFileId)
+        .toList();
+
+    if (currentPhotoIds.length != _initialPhotoIds.length) {
+      return true;
+    }
+
+    for (var i = 0; i < currentPhotoIds.length; i++) {
+      if (currentPhotoIds[i] != _initialPhotoIds[i]) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   Future<void> _pickPhotos() async {
@@ -67,14 +245,14 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
     }
   }
 
-  Future<void> _saveMemory() async {
+  Future<bool> _saveMemory({bool exitAfterSave = true}) async {
     final text = _textController.text.trim();
 
     if (text.isEmpty && _newPhotos.isEmpty && _existingPhotos.isEmpty) {
       setState(() {
         _errorMessage = 'Add some text or at least one photo';
       });
-      return;
+      return false;
     }
 
     setState(() {
@@ -116,14 +294,21 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
         );
       }
 
-      if (!mounted) return;
-      Navigator.pop(context);
+      if (!mounted) return false;
+
+      if (exitAfterSave) {
+        _popWithoutCheck();
+      }
+
+      return true;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
 
       setState(() {
         _errorMessage = e.toString();
       });
+
+      return false;
     } finally {
       if (mounted) {
         setState(() {
@@ -141,13 +326,17 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.isEditing ? 'Edit Memory' : 'Add Memory'),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
+    return PopScope(
+      canPop: _allowPop,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+
+        await _handleExit();
+      },
+      child: Scaffold(
+        appBar: AppBar(title: Text(widget.isEditing ? 'Memory' : 'Add Memory')),
+        body: ListView(
+          padding: const EdgeInsets.all(24),
           children: [
             // Show selected photos visually before saving
             // Put this above the text field:
@@ -159,7 +348,39 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
               ),
             ),
             const SizedBox(height: 8),
-
+            if (_existingPhotos.isNotEmpty)
+              ..._existingPhotos.map(
+                (photo) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: DriveImage(
+                          fileId: photo.originalFileId,
+                          width: double.infinity,
+                          fit: BoxFit.fitWidth,
+                        ),
+                      ),
+                      Positioned(
+                        right: 6,
+                        top: 6,
+                        child: IconButton.filled(
+                          onPressed: _isLoading
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _existingPhotos.remove(photo);
+                                  });
+                                },
+                          icon: const Icon(Icons.close),
+                          tooltip: 'Remove photo from memory',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             if (_newPhotos.isNotEmpty)
               SizedBox(
                 height: 110,
@@ -241,6 +462,17 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
                     : Text(widget.isEditing ? 'Save Changes' : 'Save Memory'),
               ),
             ),
+            if (widget.isEditing) ...[
+              const SizedBox(height: 16),
+              TextButton.icon(
+                onPressed: _isLoading ? null : _deleteMemory,
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Delete Memory'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ],
           ],
         ),
       ),
