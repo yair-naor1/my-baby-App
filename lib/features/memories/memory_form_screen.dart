@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../data/repositories/memory_repository.dart';
 import '../../models/memory.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import '../../models/photo_reference.dart';
+import '../../services/google_drive_service.dart';
 
 class MemoryFormScreen extends StatefulWidget {
   final String bookId;
@@ -17,6 +21,10 @@ class MemoryFormScreen extends StatefulWidget {
 
 class _MemoryFormScreenState extends State<MemoryFormScreen> {
   final _textController = TextEditingController();
+  final _imagePicker = ImagePicker();
+  final _googleDriveService = GoogleDriveService();
+  final List<XFile> _newPhotos = [];
+  final List<PhotoReference> _existingPhotos = [];
   final _memoryRepository = MemoryRepository();
 
   DateTime? _memoryDate;
@@ -30,7 +38,18 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
     if (widget.memory != null) {
       _textController.text = widget.memory!.text;
       _memoryDate = widget.memory!.memoryDate;
+      _existingPhotos.addAll(widget.memory!.photoRefs);
     }
+  }
+
+  Future<void> _pickPhotos() async {
+    final photos = await _imagePicker.pickMultiImage();
+
+    if (photos.isEmpty) return;
+
+    setState(() {
+      _newPhotos.addAll(photos);
+    });
   }
 
   Future<void> _selectDate() async {
@@ -51,9 +70,9 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
   Future<void> _saveMemory() async {
     final text = _textController.text.trim();
 
-    if (text.isEmpty) {
+    if (text.isEmpty && _newPhotos.isEmpty && _existingPhotos.isEmpty) {
       setState(() {
-        _errorMessage = 'Please write something';
+        _errorMessage = 'Add some text or at least one photo';
       });
       return;
     }
@@ -64,18 +83,36 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
     });
 
     try {
+      final uploadedPhotos = <PhotoReference>[];
+
+      for (var i = 0; i < _newPhotos.length; i++) {
+        final photo = _newPhotos[i];
+
+        final uploaded = await _googleDriveService.uploadPhoto(
+          bookId: widget.bookId,
+          photo: File(photo.path),
+          fileName: '${DateTime.now().millisecondsSinceEpoch}-$i-${photo.name}',
+        );
+
+        uploadedPhotos.add(uploaded);
+      }
+
+      final allPhotos = [..._existingPhotos, ...uploadedPhotos];
+
       if (widget.isEditing) {
         await _memoryRepository.updateMemory(
           bookId: widget.bookId,
           memoryId: widget.memory!.memoryId,
           text: text,
           memoryDate: _memoryDate!,
+          photoRefs: allPhotos,
         );
       } else {
         await _memoryRepository.createMemory(
           bookId: widget.bookId,
           text: text,
           memoryDate: _memoryDate,
+          photoRefs: allPhotos,
         );
       }
 
@@ -112,6 +149,65 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
+            // Show selected photos visually before saving
+            // Put this above the text field:
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Photos',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            if (_newPhotos.isNotEmpty)
+              SizedBox(
+                height: 110,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _newPhotos.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final photo = _newPhotos[index];
+
+                    return Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(
+                            File(photo.path),
+                            width: 100,
+                            height: 100,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        Positioned(
+                          right: 2,
+                          top: 2,
+                          child: IconButton(
+                            onPressed: () {
+                              setState(() {
+                                _newPhotos.removeAt(index);
+                              });
+                            },
+                            icon: const Icon(Icons.cancel),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+
+            OutlinedButton.icon(
+              onPressed: _isLoading ? null : _pickPhotos,
+              icon: const Icon(Icons.add_photo_alternate),
+              label: const Text('Add Photos'),
+            ),
+
+            const SizedBox(height: 20),
+
+            // So while creating a memory, you can already visually see every newly selected photo.
             TextField(
               controller: _textController,
               maxLines: 5,

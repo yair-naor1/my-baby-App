@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../models/memory.dart';
+import '../../models/photo_reference.dart';
 
 class MemoryRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -10,6 +11,7 @@ class MemoryRepository {
   Future<void> createMemory({
     required String bookId,
     required String text,
+    required List<PhotoReference> photoRefs,
     DateTime? memoryDate,
   }) async {
     final user = _auth.currentUser;
@@ -28,7 +30,7 @@ class MemoryRepository {
       'memoryId': memoryRef.id,
       'memoryDate': memoryDate ?? DateTime.now(),
       'text': text,
-      'photoRefs': <String>[],
+      'photoRefs': photoRefs.map((photo) => photo.toMap()).toList(),
       'createdBy': user.uid,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -41,6 +43,7 @@ class MemoryRepository {
     required String memoryId,
     required String text,
     required DateTime memoryDate,
+    required List<PhotoReference> photoRefs,
   }) async {
     final user = _auth.currentUser;
 
@@ -56,6 +59,7 @@ class MemoryRepository {
         .update({
           'text': text,
           'memoryDate': memoryDate,
+          'photoRefs': photoRefs.map((photo) => photo.toMap()).toList(),
           'updatedAt': FieldValue.serverTimestamp(),
         });
   }
@@ -93,7 +97,10 @@ class MemoryRepository {
               memoryId: doc.id,
               memoryDate: (data['memoryDate'] as Timestamp).toDate(),
               text: data['text'] as String? ?? '',
-              photoRefs: List<String>.from(data['photoRefs'] ?? []),
+              photoRefs: (data['photoRefs'] as List<dynamic>? ?? [])
+                  .whereType<Map<String, dynamic>>()
+                  .map(PhotoReference.fromMap)
+                  .toList(),
               createdBy: data['createdBy'] as String,
               createdAt:
                   (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
