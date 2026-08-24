@@ -266,9 +266,9 @@ class GoogleDriveService {
       if (decodedImage == null) {
         throw Exception('Could not read image');
       }
-
+      final originalWidth = decodedImage.width;
+      final originalHeight = decodedImage.height;
       final thumbnailImage = img.copyResize(decodedImage, width: 320);
-
       final thumbnailBytes = img.encodeJpg(thumbnailImage, quality: 65);
 
       final dotIndex = fileName.lastIndexOf('.');
@@ -307,6 +307,8 @@ class GoogleDriveService {
         originalFileId: uploadedOriginal.id!,
         thumbnailFileId: uploadedThumbnail.id!,
         ownerUid: firebaseUser.uid,
+        width: originalWidth,
+        height: originalHeight,
       );
     } catch (e) {
       await _tryDeleteDriveFile(driveApi, thumbnailFileId);

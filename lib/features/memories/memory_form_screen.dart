@@ -55,6 +55,21 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
         .toList();
   }
 
+  double _galleryPhotoWidth(PhotoReference photo) {
+    const rowHeight = 90.0;
+
+    if (photo.width == null ||
+        photo.height == null ||
+        photo.width == 0 ||
+        photo.height == 0) {
+      return rowHeight;
+    }
+
+    final aspectRatio = photo.width! / photo.height!;
+
+    return (rowHeight * aspectRatio).clamp(65.0, 160.0);
+  }
+
   Future<void> _deleteMemory() async {
     if (!widget.isEditing || _isLoading) return;
 
@@ -347,25 +362,32 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            if (_existingPhotos.isNotEmpty)
-              ..._existingPhotos.map(
-                (photo) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Stack(
+            if (_existingPhotos.isNotEmpty) ...[
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: _existingPhotos.map((photo) {
+                  final imageId = photo.thumbnailFileId ?? photo.originalFileId;
+
+                  return Stack(
                     children: [
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: DriveImage(
-                          key: ValueKey(photo.originalFileId),
-                          fileId: photo.originalFileId,
-                          width: double.infinity,
-                          fit: BoxFit.fitWidth,
+                        borderRadius: BorderRadius.circular(8),
+                        child: SizedBox(
+                          width: _galleryPhotoWidth(photo),
+                          height: 90,
+                          child: DriveImage(
+                            key: ValueKey(imageId),
+                            fileId: imageId,
+                            fit: BoxFit.cover,
+                          ),
                         ),
                       ),
                       Positioned(
-                        right: 6,
-                        top: 6,
+                        right: 2,
+                        top: 2,
                         child: IconButton.filled(
+                          visualDensity: VisualDensity.compact,
                           onPressed: _isLoading
                               ? null
                               : () {
@@ -373,14 +395,15 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
                                     _existingPhotos.remove(photo);
                                   });
                                 },
-                          icon: const Icon(Icons.close),
-                          tooltip: 'Remove photo from memory',
+                          icon: const Icon(Icons.close, size: 18),
                         ),
                       ),
                     ],
-                  ),
-                ),
+                  );
+                }).toList(),
               ),
+              const SizedBox(height: 12),
+            ],
             if (_newPhotos.isNotEmpty)
               SizedBox(
                 height: 110,

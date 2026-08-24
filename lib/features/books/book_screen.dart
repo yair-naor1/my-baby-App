@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/repositories/memory_repository.dart';
 import '../../models/book.dart';
 import '../../models/memory.dart';
+import '../../widgets/drive_image.dart';
 import '../memories/memory_form_screen.dart';
 
 class BookScreen extends StatelessWidget {
@@ -44,20 +45,12 @@ class BookScreen extends StatelessWidget {
             itemBuilder: (context, index) {
               final memory = memories[index];
 
+              final previewPhotos = memory.photoRefs.take(5).toList();
+
               return Card(
                 key: ValueKey(memory.memoryId),
-                child: ListTile(
-                  title: Text(
-                    memory.text,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    '${memory.memoryDate.day}/'
-                    '${memory.memoryDate.month}/'
-                    '${memory.memoryDate.year}',
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
                   onTap: () {
                     Navigator.push(
                       context,
@@ -69,6 +62,62 @@ class BookScreen extends StatelessWidget {
                       ),
                     );
                   },
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (previewPhotos.isNotEmpty) ...[
+                          Wrap(
+                            spacing: 6,
+                            children: [
+                              for (final photo in previewPhotos)
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: SizedBox(
+                                    width: 64,
+                                    height: 64,
+                                    child: DriveImage(
+                                      key: ValueKey(
+                                        photo.thumbnailFileId ??
+                                            photo.originalFileId,
+                                      ),
+                                      fileId:
+                                          photo.thumbnailFileId ??
+                                          photo.originalFileId,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+
+                        if (memory.text.isNotEmpty)
+                          Text(
+                            memory.text,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+
+                        if (memory.text.isNotEmpty) const SizedBox(height: 6),
+
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '${memory.memoryDate.day}/'
+                                '${memory.memoryDate.month}/'
+                                '${memory.memoryDate.year}',
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               );
             },
