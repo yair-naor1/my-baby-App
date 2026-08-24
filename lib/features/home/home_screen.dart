@@ -32,6 +32,95 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _renameBook(Book book) async {
+    var editedName = book.childName;
+
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Rename Book'),
+          content: TextFormField(
+            initialValue: book.childName,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: "Child's name"),
+            onChanged: (value) {
+              editedName = value;
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final name = editedName.trim();
+
+                if (name.isNotEmpty) {
+                  Navigator.pop(context, name);
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (newName == null || !mounted) return;
+
+    try {
+      await _bookRepository.updateBookName(
+        bookId: book.bookId,
+        childName: newName,
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not rename book: $e')));
+    }
+  }
+
+  Future<void> _deleteBook(Book book) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Delete book?'),
+          content: Text(
+            'Delete ${book.childName} and all memories in this book?\n\n'
+            'This cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await _bookRepository.deleteBook(book.bookId);
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not delete book: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -83,7 +172,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     '${book.birthDate.month}/'
                     '${book.birthDate.year}',
                   ),
-                  trailing: const Icon(Icons.chevron_right),
+                  trailing: PopupMenuButton<String>(
+                    onSelected: (value) {
+                      if (value == 'rename') {
+                        _renameBook(book);
+                      } else if (value == 'delete') {
+                        _deleteBook(book);
+                      }
+                    },
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(
+                        value: 'rename',
+                        child: Text('Rename Book'),
+                      ),
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Text('Delete Book'),
+                      ),
+                    ],
+                  ),
                   onTap: () {
                     Navigator.push(
                       context,

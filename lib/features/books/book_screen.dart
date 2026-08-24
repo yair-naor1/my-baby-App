@@ -6,19 +6,25 @@ import '../../models/memory.dart';
 import '../../widgets/drive_image.dart';
 import '../memories/memory_form_screen.dart';
 
-class BookScreen extends StatelessWidget {
+class BookScreen extends StatefulWidget {
   final Book book;
 
   const BookScreen({super.key, required this.book});
 
   @override
+  State<BookScreen> createState() => _BookScreenState();
+}
+
+class _BookScreenState extends State<BookScreen> {
+  @override
   Widget build(BuildContext context) {
     final memoryRepository = MemoryRepository();
 
     return Scaffold(
-      appBar: AppBar(title: Text(book.childName)),
+      appBar: AppBar(title: Text(widget.book.childName)),
       body: StreamBuilder<List<Memory>>(
-        stream: memoryRepository.watchMemories(book.bookId),
+        stream: memoryRepository.watchMemories(widget.book.bookId),
+
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -56,7 +62,7 @@ class BookScreen extends StatelessWidget {
                       context,
                       MaterialPageRoute(
                         builder: (_) => MemoryFormScreen(
-                          bookId: book.bookId,
+                          bookId: widget.book.bookId,
                           memory: memory,
                         ),
                       ),
@@ -129,7 +135,7 @@ class BookScreen extends StatelessWidget {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => MemoryFormScreen(bookId: book.bookId),
+              builder: (_) => MemoryFormScreen(bookId: widget.book.bookId),
             ),
           );
         },
