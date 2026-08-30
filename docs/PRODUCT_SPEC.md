@@ -655,8 +655,11 @@ Already built:
 - Google Drive service and Drive photo upload
 - Drive photo references connected to memories
 - `firebase_storage` dependency removed
-- First Cloud Function (`functions/enhanceMemoryText`, §15) deployed — calls
-  Gemini 3.1 Flash-Lite via Vertex AI (§10.2) for opt-in text-suggestion rewrites
+- First Cloud Function (`functions/enhanceMemoryText`, §15) deployed and
+  **confirmed working end-to-end on-device** — calls Gemini 3.1 Flash-Lite via
+  Vertex AI (§10.2) for opt-in text-suggestion rewrites. Prompt wording is still
+  being iterated on (first pass read as noticeably AI-generated; tightened to
+  explicitly ban clichés, stacked adjectives, and unnaturally balanced sentences).
 
 Files seen during development (verify against Git for exact current names):
 
@@ -688,19 +691,6 @@ functions/index.js
   backend as already used. Fixed by adding `_googleSignIn.signOut()` before
   `authenticate()` (the same pattern `changeAccount()` already used) — deployed,
   awaiting on-device confirmation.
-- **AI text enhancement backend switched to Vertex AI — see §10.2 for the full
-  story.** The original 401 traced through several false leads (secret not
-  resolving, whitespace corruption, wrong auth transport) before the real cause
-  was found: Google's new `AQ.`-format API keys are currently broken platform-wide
-  for the Developer API's key-based auth, confirmed via Google's own AI Developer
-  Forum. `enhanceMemoryText` now calls the same model through Vertex AI instead
-  (service-account auth, no API key), which required: enabling the Cloud
-  Functions API, granting the compute service account the "Agent Platform User"
-  role (`roles/aiplatform.user`), enabling `aiplatform.googleapis.com`, and using
-  the `global` location (Gemini 3.1 Flash-Lite isn't available on regional
-  endpoints like `us-central1`). Deployed; last test call logged no error, which
-  is a good sign (the code only logs failures), but not yet confirmed by actually
-  seeing suggestions render in the app.
 - **Push notifications (§7.6) not started.** Monthly birth-anniversary
   reminders and a 3-week-inactivity nudge per book both need a scheduled
   Cloud Function plus client-side FCM token registration; deferred behind the
