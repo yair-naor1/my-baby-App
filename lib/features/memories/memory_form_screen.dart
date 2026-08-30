@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../data/repositories/memory_repository.dart';
+import '../../data/services/memory_service.dart';
 import '../../models/memory.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../../models/photo_reference.dart';
 import '../../services/google_drive_service.dart';
+import '../../utils/date_format.dart';
+import '../../utils/error_messages.dart';
 import '../../widgets/drive_image.dart';
 
 enum _ExitChoice { keepEditing, saveAndExit, exitWithoutSaving }
@@ -13,8 +16,14 @@ enum _ExitChoice { keepEditing, saveAndExit, exitWithoutSaving }
 class MemoryFormScreen extends StatefulWidget {
   final String bookId;
   final Memory? memory;
+  final MemoryService? memoryService;
 
-  const MemoryFormScreen({super.key, required this.bookId, this.memory});
+  const MemoryFormScreen({
+    super.key,
+    required this.bookId,
+    this.memory,
+    this.memoryService,
+  });
 
   bool get isEditing => memory != null;
 
@@ -25,10 +34,14 @@ class MemoryFormScreen extends StatefulWidget {
 class _MemoryFormScreenState extends State<MemoryFormScreen> {
   final _textController = TextEditingController();
   final _imagePicker = ImagePicker();
-  final _googleDriveService = GoogleDriveService();
   final List<XFile> _newPhotos = [];
   final List<PhotoReference> _existingPhotos = [];
-  final _memoryRepository = MemoryRepository();
+  late final MemoryService _memoryService =
+      widget.memoryService ??
+      MemoryService(
+        photoStorage: GoogleDriveService(),
+        memoryRepository: MemoryRepository(),
+      );
   late String _initialText;
   late DateTime _initialDate;
   late List<String> _initialPhotoIds;
@@ -37,6 +50,7 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
 
   DateTime? _memoryDate;
   bool _isLoading = false;
+  String? _uploadProgressText;
   String? _errorMessage;
 
   @override
@@ -68,62 +82,6 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
     final aspectRatio = photo.width! / photo.height!;
 
     return (rowHeight * aspectRatio).clamp(65.0, 160.0);
-  }
-
-  Future<void> _deleteMemory() async {
-    if (!widget.isEditing || _isLoading) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Delete memory?'),
-          content: const Text(
-            'This memory will be permanently removed from the book.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      await _memoryRepository.deleteMemory(
-        bookId: widget.bookId,
-        memoryId: widget.memory!.memoryId,
-      );
-
-      if (!mounted) return;
-
-      _popWithoutCheck();
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _errorMessage = 'Could not delete memory: $e';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
   }
 
   Future<void> _handleExit() async {
@@ -273,40 +231,25 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _uploadProgressText = null;
     });
-    final uploadedPhotos = <PhotoReference>[];
 
     try {
-      for (var i = 0; i < _newPhotos.length; i++) {
-        final photo = _newPhotos[i];
+      await _memoryService.saveMemory(
+        bookId: widget.bookId,
+        text: text,
+        memoryDate: _memoryDate,
+        existingPhotos: _existingPhotos,
+        newPhotos: _newPhotos,
+        editingMemory: widget.memory,
+        onUploadProgress: (uploaded, total) {
+          if (!mounted || total <= 1) return;
 
-        final uploaded = await _googleDriveService.uploadPhoto(
-          bookId: widget.bookId,
-          photo: File(photo.path),
-          fileName: '${DateTime.now().millisecondsSinceEpoch}-$i-${photo.name}',
-        );
-
-        uploadedPhotos.add(uploaded);
-      }
-
-      final allPhotos = [..._existingPhotos, ...uploadedPhotos];
-
-      if (widget.isEditing) {
-        await _memoryRepository.updateMemory(
-          bookId: widget.bookId,
-          memoryId: widget.memory!.memoryId,
-          text: text,
-          memoryDate: _memoryDate!,
-          photoRefs: allPhotos,
-        );
-      } else {
-        await _memoryRepository.createMemory(
-          bookId: widget.bookId,
-          text: text,
-          memoryDate: _memoryDate,
-          photoRefs: allPhotos,
-        );
-      }
+          setState(() {
+            _uploadProgressText = 'Uploading photo $uploaded of $total…';
+          });
+        },
+      );
 
       if (!mounted) return false;
 
@@ -319,7 +262,7 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
       if (!mounted) return false;
 
       setState(() {
-        _errorMessage = e.toString();
+        _errorMessage = friendlyErrorMessage(e);
       });
 
       return false;
@@ -327,6 +270,7 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
       if (mounted) {
         setState(() {
           _isLoading = false;
+          _uploadProgressText = null;
         });
       }
     }
@@ -355,7 +299,7 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
             // Show selected photos visually before saving
             // Put this above the text field:
             Align(
-              alignment: Alignment.centerLeft,
+              alignment: AlignmentDirectional.centerStart,
               child: Text(
                 'Photos',
                 style: Theme.of(context).textTheme.titleMedium,
@@ -383,8 +327,9 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
                           ),
                         ),
                       ),
-                      Positioned(
-                        right: 2,
+                      Positioned.directional(
+                        textDirection: Directionality.of(context),
+                        end: 2,
                         top: 2,
                         child: IconButton.filled(
                           visualDensity: VisualDensity.compact,
@@ -425,8 +370,9 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
                             fit: BoxFit.cover,
                           ),
                         ),
-                        Positioned(
-                          right: 2,
+                        Positioned.directional(
+                          textDirection: Directionality.of(context),
+                          end: 2,
                           top: 2,
                           child: IconButton(
                             onPressed: () {
@@ -466,13 +412,25 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
               title: Text(
                 _memoryDate == null
                     ? 'Date: Today'
-                    : 'Date: ${_memoryDate!.day}/'
-                          '${_memoryDate!.month}/'
-                          '${_memoryDate!.year}',
+                    : 'Date: ${formatShortDate(_memoryDate!)}',
               ),
               trailing: const Icon(Icons.calendar_today),
               onTap: _selectDate,
             ),
+            if (_uploadProgressText != null) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(_uploadProgressText!),
+                ],
+              ),
+            ],
             if (_errorMessage != null)
               Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
             const SizedBox(height: 24),
@@ -485,17 +443,6 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
                     : Text(widget.isEditing ? 'Save Changes' : 'Save Memory'),
               ),
             ),
-            if (widget.isEditing) ...[
-              const SizedBox(height: 16),
-              TextButton.icon(
-                onPressed: _isLoading ? null : _deleteMemory,
-                icon: const Icon(Icons.delete_outline),
-                label: const Text('Delete Memory'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(context).colorScheme.error,
-                ),
-              ),
-            ],
           ],
         ),
       ),

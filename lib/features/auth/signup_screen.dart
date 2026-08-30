@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/repositories/auth_repository.dart';
+import '../../utils/error_messages.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -37,7 +38,10 @@ class _SignupScreenState extends State<SignupScreen> {
       Navigator.of(context).popUntil((route) => route.isFirst);
     } catch (e) {
       setState(() {
-        _errorMessage = e.toString();
+        _errorMessage = friendlyErrorMessage(
+          e,
+          fallback: 'Could not create your account. Please try again.',
+        );
       });
     } finally {
       if (mounted) {

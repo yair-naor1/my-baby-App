@@ -75,6 +75,7 @@ class BookRepository {
       'ownerIds': [user.uid],
       'language': 'en',
       'createdAt': FieldValue.serverTimestamp(),
+      'schemaVersion': currentBookSchemaVersion,
     });
   }
 
@@ -101,6 +102,7 @@ class BookRepository {
               language: data['language'] as String? ?? 'en',
               createdAt:
                   (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+              schemaVersion: data['schemaVersion'] as int? ?? 1,
             );
           }).toList();
 

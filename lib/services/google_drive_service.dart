@@ -8,7 +8,9 @@ import 'package:image/image.dart' as img;
 import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-class GoogleDriveService {
+import 'photo_storage_service.dart';
+
+class GoogleDriveService implements PhotoStorageService {
   static const _serverClientId =
       '761925234385-d1lujprjq4uo6ugddgt0tuugte9gkf30.apps.googleusercontent.com';
 
@@ -45,31 +47,44 @@ class GoogleDriveService {
     _currentAccount = null;
   }
 
-  Future<void> deleteUploadedPhotos(List<PhotoReference> photos) async {
+  @override
+  Future<void> deletePhotos(List<PhotoReference> photos) async {
     if (photos.isEmpty) return;
 
-    final account = await connect();
-
-    var authorization = await account.authorizationClient
-        .authorizationForScopes(_scopes);
-
-    authorization ??= await account.authorizationClient.authorizeScopes(
-      _scopes,
-    );
-
-    final client = authorization.authClient(scopes: _scopes);
-
-    final driveApi = drive.DriveApi(client);
-
     try {
-      for (final photo in photos) {
-        await _tryDeleteDriveFile(driveApi, photo.thumbnailFileId);
+      final account = await connect();
 
-        await _tryDeleteDriveFile(driveApi, photo.originalFileId);
+      var authorization = await account.authorizationClient
+          .authorizationForScopes(_scopes);
+
+      authorization ??= await account.authorizationClient.authorizeScopes(
+        _scopes,
+      );
+
+      final client = authorization.authClient(scopes: _scopes);
+
+      final driveApi = drive.DriveApi(client);
+
+      try {
+        for (final photo in photos) {
+          await _tryDeleteDriveFile(driveApi, photo.thumbnailFileId);
+
+          await _tryDeleteDriveFile(driveApi, photo.originalFileId);
+        }
+      } finally {
+        client.close();
       }
-    } finally {
-      client.close();
+    } catch (e) {
+      _throwStorageError(e, 'Could not remove one or more photos.');
     }
+  }
+
+  /// Wraps any thrown error in a [PhotoStorageException] with UI-safe text,
+  /// so no Drive-specific wording ever reaches a screen (spec §23).
+  Never _throwStorageError(Object error, String fallbackMessage) {
+    if (error is PhotoStorageException) throw error;
+
+    throw PhotoStorageException(fallbackMessage);
   }
 
   Future<void> _tryDeleteDriveFile(
@@ -85,36 +100,41 @@ class GoogleDriveService {
     }
   }
 
+  @override
   Future<Uint8List> downloadPhoto(String fileId) async {
-    final account = await connect();
-
-    var authorization = await account.authorizationClient
-        .authorizationForScopes(_scopes);
-
-    authorization ??= await account.authorizationClient.authorizeScopes(
-      _scopes,
-    );
-
-    final client = authorization.authClient(scopes: _scopes);
-    final driveApi = drive.DriveApi(client);
-
     try {
-      final media =
-          await driveApi.files.get(
-                fileId,
-                downloadOptions: drive.DownloadOptions.fullMedia,
-              )
-              as drive.Media;
+      final account = await connect();
 
-      final bytes = <int>[];
+      var authorization = await account.authorizationClient
+          .authorizationForScopes(_scopes);
 
-      await for (final chunk in media.stream) {
-        bytes.addAll(chunk);
+      authorization ??= await account.authorizationClient.authorizeScopes(
+        _scopes,
+      );
+
+      final client = authorization.authClient(scopes: _scopes);
+      final driveApi = drive.DriveApi(client);
+
+      try {
+        final media =
+            await driveApi.files.get(
+                  fileId,
+                  downloadOptions: drive.DownloadOptions.fullMedia,
+                )
+                as drive.Media;
+
+        final bytes = <int>[];
+
+        await for (final chunk in media.stream) {
+          bytes.addAll(chunk);
+        }
+
+        return Uint8List.fromList(bytes);
+      } finally {
+        client.close();
       }
-
-      return Uint8List.fromList(bytes);
-    } finally {
-      client.close();
+    } catch (e) {
+      _throwStorageError(e, 'Could not load this photo. Please try again.');
     }
   }
 
@@ -252,6 +272,7 @@ class GoogleDriveService {
     return created.id!;
   }
 
+  @override
   Future<PhotoReference> uploadPhoto({
     required String bookId,
     required File photo,
@@ -361,7 +382,10 @@ class GoogleDriveService {
 
       await _tryDeleteDriveFile(driveApi, originalFileId);
 
-      rethrow;
+      _throwStorageError(
+        e,
+        'Could not save the photo. Please check your connection and try again.',
+      );
     } finally {
       client.close();
     }

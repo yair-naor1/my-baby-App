@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../data/repositories/book_repository.dart';
+import '../../data/repositories/memory_repository.dart';
+import '../../data/services/book_service.dart';
 import '../../models/book.dart';
+import '../../utils/date_format.dart';
+import '../../utils/error_messages.dart';
 import '../books/create_book_screen.dart';
 import '../books/book_screen.dart';
 import '../../services/google_drive_service.dart';
@@ -17,6 +21,11 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _bookRepository = BookRepository();
   final _googleDriveService = GoogleDriveService();
+  late final _bookService = BookService(
+    bookRepository: _bookRepository,
+    memoryRepository: MemoryRepository(),
+    photoStorage: _googleDriveService,
+  );
   late final _booksStream = _bookRepository.watchMyBooks();
 
   Future<void> _logout() async {
@@ -26,9 +35,9 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not log out. Please try again.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(e))));
     }
   }
 
@@ -80,7 +89,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Could not rename book: $e')));
+      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(e))));
     }
   }
 
@@ -111,13 +120,13 @@ class _HomeScreenState extends State<HomeScreen> {
     if (confirmed != true || !mounted) return;
 
     try {
-      await _bookRepository.deleteBook(book.bookId);
+      await _bookService.deleteBook(book.bookId);
     } catch (e) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Could not delete book: $e')));
+      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(e))));
     }
   }
 
@@ -167,11 +176,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 key: ValueKey(book.bookId),
                 child: ListTile(
                   title: Text(book.childName),
-                  subtitle: Text(
-                    'Born ${book.birthDate.day}/'
-                    '${book.birthDate.month}/'
-                    '${book.birthDate.year}',
-                  ),
+                  subtitle: Text('Born ${formatShortDate(book.birthDate)}'),
                   trailing: PopupMenuButton<String>(
                     onSelected: (value) {
                       if (value == 'rename') {

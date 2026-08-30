@@ -1,5 +1,10 @@
 import 'photo_reference.dart';
 
+/// Bump when the Firestore document shape for
+/// `books/{bookId}/memories/{memoryId}` changes in a way old clients can't
+/// read safely. See PRODUCT_SPEC.md §8.4.
+const currentMemorySchemaVersion = 1;
+
 class Memory {
   final String memoryId;
   final DateTime memoryDate;
@@ -9,6 +14,7 @@ class Memory {
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool hiddenFromBook;
+  final int schemaVersion;
 
   Memory({
     required this.memoryId,
@@ -19,5 +25,6 @@ class Memory {
     required this.createdAt,
     required this.updatedAt,
     required this.hiddenFromBook,
+    required this.schemaVersion,
   });
 }

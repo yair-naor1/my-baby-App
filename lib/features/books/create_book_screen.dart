@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../data/repositories/book_repository.dart';
+import '../../utils/date_format.dart';
+import '../../utils/error_messages.dart';
 
 class CreateBookScreen extends StatefulWidget {
   const CreateBookScreen({super.key});
@@ -60,7 +62,7 @@ class _CreateBookScreenState extends State<CreateBookScreen> {
       if (!mounted) return;
 
       setState(() {
-        _errorMessage = e.toString();
+        _errorMessage = friendlyErrorMessage(e);
       });
     } finally {
       if (mounted) {
@@ -97,7 +99,7 @@ class _CreateBookScreenState extends State<CreateBookScreen> {
               title: Text(
                 _birthDate == null
                     ? 'Select birth date'
-                    : '${_birthDate!.day}/${_birthDate!.month}/${_birthDate!.year}',
+                    : formatShortDate(_birthDate!),
               ),
               trailing: const Icon(Icons.calendar_today),
               onTap: _selectBirthDate,
