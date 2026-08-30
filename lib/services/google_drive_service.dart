@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/photo_reference.dart';
 import 'package:image/image.dart' as img;
 import 'dart:typed_data';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class GoogleDriveService {
   static const _serverClientId =
@@ -14,9 +15,25 @@ class GoogleDriveService {
   static const _scopes = <String>['https://www.googleapis.com/auth/drive.file'];
 
   static final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   static Future<void>? _initialization;
   static GoogleSignInAccount? _currentAccount;
+
+  Future<String?> _getSavedDriveEmail(String uid) async {
+    final doc = await _firestore.collection('users').doc(uid).get();
+
+    return doc.data()?['driveAccountEmail'] as String?;
+  }
+
+  Future<void> _saveDriveEmail({
+    required String uid,
+    required String email,
+  }) async {
+    await _firestore.collection('users').doc(uid).set({
+      'driveAccountEmail': email,
+    }, SetOptions(merge: true));
+  }
 
   Future<void> _ensureInitialized() {
     return _initialization ??= _googleSignIn.initialize(
@@ -25,9 +42,6 @@ class GoogleDriveService {
   }
 
   Future<void> clearSession() async {
-    await _ensureInitialized();
-
-    await _googleSignIn.signOut();
     _currentAccount = null;
   }
 
@@ -107,6 +121,12 @@ class GoogleDriveService {
   Future<GoogleSignInAccount> changeAccount() async {
     await _ensureInitialized();
 
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+
+    if (firebaseUser == null) {
+      throw Exception('User is not logged in');
+    }
+
     await _googleSignIn.signOut();
     _currentAccount = null;
 
@@ -119,6 +139,8 @@ class GoogleDriveService {
       _scopes,
     );
 
+    await _saveDriveEmail(uid: firebaseUser.uid, email: account.email);
+
     _currentAccount = account;
 
     return account;
@@ -127,17 +149,41 @@ class GoogleDriveService {
   Future<GoogleSignInAccount> connect() async {
     await _ensureInitialized();
 
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+
+    if (firebaseUser == null) {
+      throw Exception('User is not logged in');
+    }
+
+    final savedEmail = await _getSavedDriveEmail(firebaseUser.uid);
+
     var account = _currentAccount;
 
-    if (account == null) {
+    // Never reuse an in-memory account belonging to another Baby Book user.
+    if (account != null && savedEmail != null && account.email != savedEmail) {
+      account = null;
+    }
+
+    if (account == null && savedEmail != null) {
       final lightweightAuth = _googleSignIn.attemptLightweightAuthentication();
 
       if (lightweightAuth != null) {
-        account = await lightweightAuth;
+        final restoredAccount = await lightweightAuth;
+
+        if (restoredAccount != null && restoredAccount.email == savedEmail) {
+          account = restoredAccount;
+        }
       }
     }
 
-    account ??= await _googleSignIn.authenticate(scopeHint: _scopes);
+    // No saved account, or Google restored the wrong user's account.
+    if (account == null) {
+      await _googleSignIn.signOut();
+
+      account = await _googleSignIn.authenticate(scopeHint: _scopes);
+
+      await _saveDriveEmail(uid: firebaseUser.uid, email: account.email);
+    }
 
     var authorization = await account.authorizationClient
         .authorizationForScopes(_scopes);

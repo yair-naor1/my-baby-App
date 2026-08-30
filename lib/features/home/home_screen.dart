@@ -125,7 +125,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Baby Book'),
+        title: const Text('My albums'),
         actions: [
           IconButton(
             onPressed: _logout,
