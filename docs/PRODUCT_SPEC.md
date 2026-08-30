@@ -70,6 +70,7 @@ presents them beautifully.*
 | Hebrew is first-class | Full Hebrew support: UI, RTL, typography, and albums that read right-to-left. |
 | Hide the infrastructure | The parent is creating memories, not managing cloud storage. |
 | Durability over cleverness | Baby memories cannot be recreated. Prefer boring and reliable. |
+| Users own their own ongoing costs, wherever realistic | The operator should not centrally pay for every user's resource usage as the base grows — applies to photo storage (§9.3: Drive/R2) and AI (§15/§10.2) alike. Where a genuinely user-owned mechanism isn't currently possible, prefer the cheapest operator-covered stopgap over building nothing, but treat it as temporary, not the destination. |
 
 ---
 
@@ -282,7 +283,7 @@ local cache.
 | Firebase Authentication | Baby Book account, sign-in, UID |
 | Cloud Firestore | Books, memories, text, dates, membership, photo metadata |
 | Cloud Messaging | Push notifications for monthly reminders |
-| Cloud Functions / Cloud Run | `enhanceMemoryText` (§15, deployed but not yet working — see known issues §20) live; cleanup, PDF generation, thumbnails still future work |
+| Cloud Functions / Cloud Run | `enhanceMemoryText` (§15) live on Vertex AI — see §10.2 for why it's not on the Developer API's free tier; cleanup, PDF generation, thumbnails still future work |
 | Local cache | Fast reads, weak-connection use, save/upload queue |
 
 **Why not store everything only on the phone:** losing or replacing a phone must not
@@ -432,6 +433,32 @@ the current milestone (§21).
   capture, paid PDF export or printed book. Now load-bearing, not just a nice-to-have:
   §9.3's R2 decision gives the operator a real, use-scaling hosting cost that Drive
   didn't have.
+- **AI enhancement backend (§15) — blocking, temporary state.** Target architecture
+  per the "users own their own costs" principle (§4) is BYOK: each user supplies
+  their own free Gemini API key, client calls Gemini directly, operator pays and
+  sees nothing. **Currently impossible for anyone** — verified 2026-08-30 against
+  Google's AI Developer Forum (multiple threads, one with a Google staff reply):
+  AI Studio now issues only the new `AQ.`-prefix key format, and that format
+  currently 401s on `generateContent` with `ACCESS_TOKEN_TYPE_UNSUPPORTED` for
+  every caller, Google-acknowledged, no ETA, no workaround — this blocks the
+  operator's own free-tier key exactly as much as it would block a user's own key,
+  so BYOK isn't buildable right now regardless of UX investment. Also verified: no
+  OAuth mechanism lets "sign in with Google" bill a third-party app's AI usage to
+  the signed-in user's own account — Google had exactly this (`peruserquota`
+  scope) and deprecated it after "unexpected billing" reports. On-device AI
+  (Gemini Nano/ML Kit GenAI) was evaluated and rejected as the primary path: its
+  Rewriting/Proofreading APIs don't support Hebrew (confirmed against the actual
+  API docs — supported languages are English/Japanese/French/German/Italian/
+  Spanish/Korean), and device coverage is flagship-only either way. Apple
+  Foundation Models (iOS) do support Hebrew and could be a later opportunistic
+  addition, but can't be the whole answer since Android has no equivalent.
+  **Current stopgap:** `enhanceMemoryText` calls Gemini 3.1 Flash-Lite via Vertex
+  AI, authenticated with the Cloud Function's own service-account identity (no
+  API key, sidesteps the bug entirely) — operator-paid, cheap (§6 of the AI
+  analysis: fractions of a cent per call), explicitly agreed as temporary.
+  **Revisit:** switch to real BYOK once Google fixes the Developer API key bug;
+  retire the Vertex AI path at that point rather than keeping it as a permanent
+  parallel option.
 - **PDF rendering approach** — client-side vs. server-side. Flutter's `pdf` package has
   weak RTL shaping and bidi handling. Prototype a Hebrew page early, before building
   an editor on top of an approach that cannot render it.
@@ -544,12 +571,14 @@ AI-generated narrative.
 If text rewriting is ever added, it must be explicit and opt-in.
 
 **Implemented (§20 has current status):** an "Enhance text" button in Add/Edit
-Memory calls `functions/enhanceMemoryText` (Gemini 2.5 Flash-Lite, free tier — no
-per-request cost), which returns 3 alternative phrasings for the parent to pick
-from or dismiss; nothing is ever applied automatically. The prompt is the actual
-enforcement point for the "not acceptable" list above — it explicitly forbids
-inventing detail, changing meaning/length, or translating, and requires 3
-genuinely different phrasings rather than trivial word swaps.
+Memory calls `functions/enhanceMemoryText` (Gemini 3.1 Flash-Lite via Vertex AI —
+see §10.2 for why not the Developer API), returning exactly 3 named-style
+rewrites — `natural`, `warm`, `playful` — as structured JSON (`responseSchema`,
+not parsed free text) for the parent to pick from or dismiss; nothing is ever
+applied automatically. The prompt is the actual enforcement point for the "not
+acceptable" list above — it explicitly forbids inventing detail, changing
+meaning/length, or translating, and requires the parent's own voice to come
+through rather than generic AI phrasing.
 
 ---
 
@@ -627,7 +656,7 @@ Already built:
 - Drive photo references connected to memories
 - `firebase_storage` dependency removed
 - First Cloud Function (`functions/enhanceMemoryText`, §15) deployed — calls
-  Gemini 2.5 Flash-Lite (free tier) for opt-in text-suggestion rewrites
+  Gemini 3.1 Flash-Lite via Vertex AI (§10.2) for opt-in text-suggestion rewrites
 
 Files seen during development (verify against Git for exact current names):
 
@@ -648,30 +677,34 @@ functions/index.js
 
 ### Known unfinished work
 
-- **Google sign-in fails for an account already linked to an existing
-  email/password Baby Book account**, even after clearing local app data to
-  rule out stale on-device state: `signInWithCredential` (not
-  `linkWithCredential` — nobody is signed in at the point this fires) throws
-  `FirebaseAuthException` with code `unknown` and message containing
-  `PROVIDER_ALREADY_LINKED`. A `GoogleAccountConflict` path was added to
-  `AuthRepository.signInWithGoogle` for the *different*
-  `account-exists-with-different-credential` case (prompts for the existing
-  account's password and links) and works for that case, but does not cover
-  this one. Root cause not yet found — temporary diagnostic logging is left
-  in `auth_choice_screen.dart` (`[auth-diagnostic]` prefix) to pick this back
-  up.
-- **AI text enhancement (`enhanceMemoryText`) deploys successfully but the
-  Gemini API call 401s** with "Expected OAuth 2 access token" — evidence
-  points at the API key not reaching `@google/genai`'s client, which then
-  silently falls back to the Cloud Function's ambient Google credentials
-  (which aren't valid for the Gemini Developer API's key-based auth). A
-  diagnostic log line (`GEMINI_API_KEY diagnostic:`) was added to `index.js`
-  to confirm whether the secret is actually resolving at runtime — not yet
-  captured/resolved.
+- **Google sign-in `PROVIDER_ALREADY_LINKED` — fix applied, not yet confirmed.**
+  An account already linked to Google via an earlier session (either this one's
+  own testing, or a real prior link) would fail on a fresh `signInWithCredential`
+  even after clearing local app data. Root cause: `signInInteractively()` called
+  `_googleSignIn.authenticate()` without first calling `.signOut()` — the newer
+  Credential-Manager-backed `authenticate()` can silently hand back a cached
+  session/token instead of a fresh OAuth exchange, and a reused token already
+  consumed by an earlier `linkWithCredential` call gets rejected by Firebase's
+  backend as already used. Fixed by adding `_googleSignIn.signOut()` before
+  `authenticate()` (the same pattern `changeAccount()` already used) — deployed,
+  awaiting on-device confirmation.
+- **AI text enhancement backend switched to Vertex AI — see §10.2 for the full
+  story.** The original 401 traced through several false leads (secret not
+  resolving, whitespace corruption, wrong auth transport) before the real cause
+  was found: Google's new `AQ.`-format API keys are currently broken platform-wide
+  for the Developer API's key-based auth, confirmed via Google's own AI Developer
+  Forum. `enhanceMemoryText` now calls the same model through Vertex AI instead
+  (service-account auth, no API key), which required: enabling the Cloud
+  Functions API, granting the compute service account the "Agent Platform User"
+  role (`roles/aiplatform.user`), enabling `aiplatform.googleapis.com`, and using
+  the `global` location (Gemini 3.1 Flash-Lite isn't available on regional
+  endpoints like `us-central1`). Deployed; last test call logged no error, which
+  is a good sign (the code only logs failures), but not yet confirmed by actually
+  seeing suggestions render in the app.
 - **Push notifications (§7.6) not started.** Monthly birth-anniversary
   reminders and a 3-week-inactivity nudge per book both need a scheduled
-  Cloud Function plus client-side FCM token registration; deferred until the
-  Cloud Functions issues above are resolved, since they'd share that setup.
+  Cloud Function plus client-side FCM token registration; deferred behind the
+  AI work above since it's the same Cloud Functions surface.
 
 ---
 

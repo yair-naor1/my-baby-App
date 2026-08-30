@@ -147,6 +147,15 @@ class GoogleDriveService implements PhotoStorageService {
   Future<GoogleSignInAccount> signInInteractively() async {
     await _ensureInitialized();
 
+    // Without this, the newer Credential-Manager-backed authenticate() can
+    // silently hand back a cached session/token instead of doing a fresh
+    // OAuth exchange. If that reused token was already consumed by an
+    // earlier linkWithCredential call, Firebase's backend rejects it as
+    // already used (surfaces as FirebaseAuthException PROVIDER_ALREADY_LINKED
+    // even from a plain signInWithCredential). Forcing a fresh session here
+    // — same fix changeAccount() already applies — avoids that collision.
+    await _googleSignIn.signOut();
+
     final account = await _googleSignIn.authenticate(scopeHint: _scopes);
 
     var authorization = await account.authorizationClient

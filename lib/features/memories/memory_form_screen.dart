@@ -520,12 +520,18 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
   }
 }
 
+const _suggestionStyleLabels = {
+  'natural': 'Natural',
+  'warm': 'Warm',
+  'playful': 'Playful',
+};
+
 /// Lets the parent pick one of the AI-suggested rewrites, or dismiss without
 /// changing anything — the suggestion is never applied automatically.
 class _TextSuggestionsSheet extends StatelessWidget {
   const _TextSuggestionsSheet({required this.suggestions});
 
-  final List<String> suggestions;
+  final List<TextSuggestion> suggestions;
 
   @override
   Widget build(BuildContext context) {
@@ -550,8 +556,12 @@ class _TextSuggestionsSheet extends StatelessWidget {
               (suggestion) => Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
-                  title: Text(suggestion),
-                  onTap: () => Navigator.pop(context, suggestion),
+                  title: Text(suggestion.text),
+                  subtitle: Text(
+                    _suggestionStyleLabels[suggestion.style] ??
+                        suggestion.style,
+                  ),
+                  onTap: () => Navigator.pop(context, suggestion.text),
                 ),
               ),
             ),
