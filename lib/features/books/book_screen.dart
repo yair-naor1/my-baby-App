@@ -219,7 +219,6 @@ class _BookScreenState extends State<BookScreen> {
                   key: ValueKey(memory.memoryId),
                   memory: memory,
                   onTap: () => _openMemory(memory),
-                  onEdit: () => _openMemory(memory),
                   onDelete: () => _deleteMemory(memory),
                 ),
               );
@@ -245,7 +244,6 @@ class _MemoryCard extends StatelessWidget {
     super.key,
     required this.memory,
     required this.onTap,
-    required this.onEdit,
     required this.onDelete,
   });
 
@@ -254,7 +252,6 @@ class _MemoryCard extends StatelessWidget {
 
   final Memory memory;
   final VoidCallback onTap;
-  final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   @override
@@ -302,18 +299,10 @@ class _MemoryCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                PopupMenuButton<String>(
-                  onSelected: (value) {
-                    if (value == 'edit') {
-                      onEdit();
-                    } else if (value == 'delete') {
-                      onDelete();
-                    }
-                  },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(value: 'edit', child: Text('Edit')),
-                    PopupMenuItem(value: 'delete', child: Text('Delete')),
-                  ],
+                IconButton(
+                  onPressed: onDelete,
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Delete memory',
                 ),
               ],
             ),

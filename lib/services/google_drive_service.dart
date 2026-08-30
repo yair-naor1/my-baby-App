@@ -7,6 +7,7 @@ import '../models/photo_reference.dart';
 import 'package:image/image.dart' as img;
 import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
 
 import 'photo_storage_service.dart';
 
@@ -21,6 +22,23 @@ class GoogleDriveService implements PhotoStorageService {
 
   static Future<void>? _initialization;
   static GoogleSignInAccount? _currentAccount;
+
+  // Which Firebase uid _currentAccount was resolved for. connect() only
+  // trusts the cached account when this still matches the signed-in Baby
+  // Book user — otherwise a second Baby Book user on the same device/app
+  // process could inherit the first user's Drive account.
+  static String? _currentAccountForUid;
+
+  // A single in-flight authentication is shared by every concurrent caller
+  // instead of each one re-authenticating independently (previously, N
+  // photos loading at once meant N redundant sign-in round trips).
+  static Future<GoogleSignInAccount>? _connecting;
+
+  // Reused across calls so N photo operations share one authenticated HTTP
+  // connection instead of paying a fresh TLS handshake + token fetch per
+  // photo. Invalidated whenever the account changes or a request fails.
+  static http.Client? _cachedClient;
+  static drive.DriveApi? _cachedDriveApi;
 
   Future<String?> _getSavedDriveEmail(String uid) async {
     final doc = await _firestore.collection('users').doc(uid).get();
@@ -45,6 +63,14 @@ class GoogleDriveService implements PhotoStorageService {
 
   Future<void> clearSession() async {
     _currentAccount = null;
+    _currentAccountForUid = null;
+    _invalidateClientCache();
+  }
+
+  void _invalidateClientCache() {
+    _cachedClient?.close();
+    _cachedClient = null;
+    _cachedDriveApi = null;
   }
 
   @override
@@ -52,27 +78,12 @@ class GoogleDriveService implements PhotoStorageService {
     if (photos.isEmpty) return;
 
     try {
-      final account = await connect();
+      final driveApi = await _getDriveApi();
 
-      var authorization = await account.authorizationClient
-          .authorizationForScopes(_scopes);
+      for (final photo in photos) {
+        await _tryDeleteDriveFile(driveApi, photo.thumbnailFileId);
 
-      authorization ??= await account.authorizationClient.authorizeScopes(
-        _scopes,
-      );
-
-      final client = authorization.authClient(scopes: _scopes);
-
-      final driveApi = drive.DriveApi(client);
-
-      try {
-        for (final photo in photos) {
-          await _tryDeleteDriveFile(driveApi, photo.thumbnailFileId);
-
-          await _tryDeleteDriveFile(driveApi, photo.originalFileId);
-        }
-      } finally {
-        client.close();
+        await _tryDeleteDriveFile(driveApi, photo.originalFileId);
       }
     } catch (e) {
       _throwStorageError(e, 'Could not remove one or more photos.');
@@ -80,8 +91,12 @@ class GoogleDriveService implements PhotoStorageService {
   }
 
   /// Wraps any thrown error in a [PhotoStorageException] with UI-safe text,
-  /// so no Drive-specific wording ever reaches a screen (spec §23).
+  /// so no Drive-specific wording ever reaches a screen (spec §23). Also
+  /// drops the cached client, so a stale/expired token doesn't keep failing
+  /// silently on every subsequent call.
   Never _throwStorageError(Object error, String fallbackMessage) {
+    _invalidateClientCache();
+
     if (error is PhotoStorageException) throw error;
 
     throw PhotoStorageException(fallbackMessage);
@@ -103,52 +118,34 @@ class GoogleDriveService implements PhotoStorageService {
   @override
   Future<Uint8List> downloadPhoto(String fileId) async {
     try {
-      final account = await connect();
+      final driveApi = await _getDriveApi();
 
-      var authorization = await account.authorizationClient
-          .authorizationForScopes(_scopes);
+      final media =
+          await driveApi.files.get(
+                fileId,
+                downloadOptions: drive.DownloadOptions.fullMedia,
+              )
+              as drive.Media;
 
-      authorization ??= await account.authorizationClient.authorizeScopes(
-        _scopes,
-      );
+      final bytes = <int>[];
 
-      final client = authorization.authClient(scopes: _scopes);
-      final driveApi = drive.DriveApi(client);
-
-      try {
-        final media =
-            await driveApi.files.get(
-                  fileId,
-                  downloadOptions: drive.DownloadOptions.fullMedia,
-                )
-                as drive.Media;
-
-        final bytes = <int>[];
-
-        await for (final chunk in media.stream) {
-          bytes.addAll(chunk);
-        }
-
-        return Uint8List.fromList(bytes);
-      } finally {
-        client.close();
+      await for (final chunk in media.stream) {
+        bytes.addAll(chunk);
       }
+
+      return Uint8List.fromList(bytes);
     } catch (e) {
       _throwStorageError(e, 'Could not load this photo. Please try again.');
     }
   }
 
-  Future<GoogleSignInAccount> changeAccount() async {
+  /// Signs in interactively (shows the Google account picker) and requests
+  /// the Drive scope in the same consent step, so a fresh sign-in never
+  /// needs a second prompt later for photo access. Used both by
+  /// [changeAccount] and by the unified "Sign in with Google" flow in
+  /// AuthRepository.
+  Future<GoogleSignInAccount> signInInteractively() async {
     await _ensureInitialized();
-
-    final firebaseUser = FirebaseAuth.instance.currentUser;
-
-    if (firebaseUser == null) {
-      throw Exception('User is not logged in');
-    }
-
-    await _googleSignIn.signOut();
-    _currentAccount = null;
 
     final account = await _googleSignIn.authenticate(scopeHint: _scopes);
 
@@ -159,32 +156,69 @@ class GoogleDriveService implements PhotoStorageService {
       _scopes,
     );
 
-    await _saveDriveEmail(uid: firebaseUser.uid, email: account.email);
-
     _currentAccount = account;
+    _currentAccountForUid = null;
+    _invalidateClientCache();
 
     return account;
   }
 
-  Future<GoogleSignInAccount> connect() async {
-    await _ensureInitialized();
+  /// Remembers the currently-authenticated Google account as [uid]'s Drive
+  /// account, so [connect] can restore it silently on later launches (and
+  /// immediately reuse it this session) without a second authorization
+  /// prompt. Call this once the Baby Book identity for the sign-in is known.
+  Future<void> rememberSignedInAccountFor(String uid) async {
+    final account = _currentAccount;
 
+    if (account == null) return;
+
+    _currentAccountForUid = uid;
+
+    await _saveDriveEmail(uid: uid, email: account.email);
+  }
+
+  Future<GoogleSignInAccount> changeAccount() async {
     final firebaseUser = FirebaseAuth.instance.currentUser;
 
     if (firebaseUser == null) {
       throw Exception('User is not logged in');
     }
 
-    final savedEmail = await _getSavedDriveEmail(firebaseUser.uid);
+    await _ensureInitialized();
+    await _googleSignIn.signOut();
 
-    var account = _currentAccount;
+    final account = await signInInteractively();
 
-    // Never reuse an in-memory account belonging to another Baby Book user.
-    if (account != null && savedEmail != null && account.email != savedEmail) {
-      account = null;
+    await rememberSignedInAccountFor(firebaseUser.uid);
+
+    return account;
+  }
+
+  Future<GoogleSignInAccount> connect() async {
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+
+    if (firebaseUser == null) {
+      throw Exception('User is not logged in');
     }
 
-    if (account == null && savedEmail != null) {
+    // Already resolved for this exact Baby Book user this session — skip
+    // the Firestore lookup and re-authentication entirely.
+    if (_currentAccount != null && _currentAccountForUid == firebaseUser.uid) {
+      return _currentAccount!;
+    }
+
+    return _connecting ??= _connectSlow(firebaseUser.uid).whenComplete(() {
+      _connecting = null;
+    });
+  }
+
+  Future<GoogleSignInAccount> _connectSlow(String uid) async {
+    await _ensureInitialized();
+
+    final savedEmail = await _getSavedDriveEmail(uid);
+    GoogleSignInAccount? account;
+
+    if (savedEmail != null) {
       final lightweightAuth = _googleSignIn.attemptLightweightAuthentication();
 
       if (lightweightAuth != null) {
@@ -202,7 +236,7 @@ class GoogleDriveService implements PhotoStorageService {
 
       account = await _googleSignIn.authenticate(scopeHint: _scopes);
 
-      await _saveDriveEmail(uid: firebaseUser.uid, email: account.email);
+      await _saveDriveEmail(uid: uid, email: account.email);
     }
 
     var authorization = await account.authorizationClient
@@ -213,8 +247,35 @@ class GoogleDriveService implements PhotoStorageService {
     );
 
     _currentAccount = account;
+    _currentAccountForUid = uid;
+    _invalidateClientCache();
 
     return account;
+  }
+
+  /// A Drive API client authenticated as the current account, reused across
+  /// calls instead of opening a fresh HTTP connection (and paying a new TLS
+  /// handshake + token fetch) for every photo.
+  Future<drive.DriveApi> _getDriveApi() async {
+    final account = await connect();
+
+    final cached = _cachedDriveApi;
+    if (cached != null) return cached;
+
+    var authorization = await account.authorizationClient
+        .authorizationForScopes(_scopes);
+
+    authorization ??= await account.authorizationClient.authorizeScopes(
+      _scopes,
+    );
+
+    final client = authorization.authClient(scopes: _scopes);
+    final driveApi = drive.DriveApi(client);
+
+    _cachedClient = client;
+    _cachedDriveApi = driveApi;
+
+    return driveApi;
   }
 
   Future<String> _getOrCreateRootFolder(drive.DriveApi driveApi) async {
@@ -284,17 +345,7 @@ class GoogleDriveService implements PhotoStorageService {
       throw Exception('User is not logged in');
     }
 
-    final account = await connect();
-
-    var authorization = await account.authorizationClient
-        .authorizationForScopes(_scopes);
-
-    authorization ??= await account.authorizationClient.authorizeScopes(
-      _scopes,
-    );
-
-    final client = authorization.authClient(scopes: _scopes);
-    final driveApi = drive.DriveApi(client);
+    final driveApi = await _getDriveApi();
     String? originalFileId;
     String? thumbnailFileId;
     try {
@@ -386,8 +437,6 @@ class GoogleDriveService implements PhotoStorageService {
         e,
         'Could not save the photo. Please check your connection and try again.',
       );
-    } finally {
-      client.close();
     }
   }
 }

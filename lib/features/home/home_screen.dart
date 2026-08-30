@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/book_repository.dart';
 import '../../data/repositories/memory_repository.dart';
 import '../../data/services/book_service.dart';
@@ -21,12 +22,54 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _bookRepository = BookRepository();
   final _googleDriveService = GoogleDriveService();
+  final _authRepository = AuthRepository();
   late final _bookService = BookService(
     bookRepository: _bookRepository,
     memoryRepository: MemoryRepository(),
     photoStorage: _googleDriveService,
   );
   late final _booksStream = _bookRepository.watchMyBooks();
+  late bool _isGoogleLinked = _checkGoogleLinked();
+  bool _isLinkingGoogle = false;
+
+  bool _checkGoogleLinked() {
+    return FirebaseAuth.instance.currentUser?.providerData.any(
+          (info) => info.providerId == 'google.com',
+        ) ??
+        false;
+  }
+
+  Future<void> _linkGoogleAccount() async {
+    setState(() {
+      _isLinkingGoogle = true;
+    });
+
+    try {
+      await _authRepository.signInWithGoogle();
+
+      if (!mounted) return;
+
+      setState(() {
+        _isGoogleLinked = true;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Google account linked.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(e))));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLinkingGoogle = false;
+        });
+      }
+    }
+  }
 
   Future<void> _logout() async {
     try {
@@ -136,6 +179,18 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('My albums'),
         actions: [
+          if (!_isGoogleLinked)
+            IconButton(
+              onPressed: _isLinkingGoogle ? null : _linkGoogleAccount,
+              icon: _isLinkingGoogle
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.link),
+              tooltip: 'Link Google Account',
+            ),
           IconButton(
             onPressed: _logout,
             icon: const Icon(Icons.logout),

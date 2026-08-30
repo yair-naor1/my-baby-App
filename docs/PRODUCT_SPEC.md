@@ -133,7 +133,9 @@ list in the middle, and a prominent, always-reachable **Add** button.
   not a row of previews, so photo count never changes the card's size.
 - A photo-less card shows a small placeholder icon in the same thumbnail slot
   instead of collapsing, keeping every card's layout identical.
-- Tapping an item opens the full memory view with Edit / Delete available.
+- Tapping an item opens it directly in the Edit Memory form (§7.4). A dedicated
+  delete icon on the card itself handles Delete (§7.5) — no intermediate detail
+  view or menu.
 - Add is reachable without passing through a questionnaire or wizard.
 
 **Performance rule:** a timeline card downloads and renders only a single small,
@@ -168,8 +170,10 @@ Edit the user can change text, change the date, add photos, and remove photos.
 Changing the date immediately changes chronological placement in both the timeline
 and the generated album.
 
-UI direction: a three-dot menu on a memory with **Edit** and **Delete**. Date editing
-lives inside Edit Memory, not as a separate menu action. Avoid duplicate flows.
+UI direction: tapping a memory card opens it directly in the Edit Memory form — no
+three-dot menu or intermediate detail view. Delete is its own icon directly on the
+card (§7.5), not a menu action. Date editing lives inside Edit Memory, not as a
+separate action. Avoid duplicate flows.
 
 ### 7.5 Delete
 
@@ -285,21 +289,104 @@ Do not merge these:
 Being signed into Baby Book does not mean photo storage is connected. Disconnecting
 photo storage must not delete the Baby Book account.
 
-### 9.3 Photo storage — UNRESOLVED, see §10.1
+Google sign-in is a deliberate exception, not a violation of this: it bundles Baby
+Book identity and Drive photo-storage authorization into one consent step for UX
+simplicity (`AuthRepository.signInWithGoogle`), while still keeping them as separate
+concerns underneath — the Drive account is remembered against the signed-in `uid` in
+Firestore (`GoogleDriveService.rememberSignedInAccountFor`), not fused into the auth
+credential itself. An email/password account can separately link Google later (Home
+screen "Link Google Account") to gain photo storage without changing identity.
 
-The PRD originally specified Firebase Cloud Storage. That was later replaced with
-**Google Drive**, and `firebase_storage` was removed from the project. A
-`GoogleDriveService` exists in the repository.
+### 9.3 Photo storage — Cloudflare R2
 
-The motivation was cost: a baby album can hold a large number of high-resolution
-images, and the operator should not pay to host every user's personal photo library.
-The intended model was *"your photos live in your own cloud storage; Baby Book
-organizes them."*
+**Decided (2026-08-30).** Photo bytes will be stored in a Cloudflare R2 bucket
+owned by the Baby Book operator, replacing Google Drive. `GoogleDriveService`
+remains in place and in use for the current milestone (§21) — this is the target
+architecture for a future migration, **not yet implemented**.
 
-**This decision is now reopened.** See §10.1 before writing further Drive code.
+**Why not Google Drive (closed).** The PRD originally specified Firebase Cloud
+Storage; that was replaced with Google Drive on the premise that photos could live
+in each user's own free Drive quota at zero cost to the operator. That premise is
+now invalidated: `drive.file` access does not extend to a folder shared by another
+user, confirmed by hands-on two-account device testing (Google's own docs and
+public developer discussion don't cover this scenario, so documentation research
+alone was inconclusive):
 
-If Drive remains in use: request the minimum reasonable permission scope, prefer
-operating only on files the app created, and never scan unrelated Drive content.
+- Account A shared its Drive root folder with Account B (`permissions.create`,
+  reader role) — confirmed working; the folder and a pre-existing test file were
+  visible under Account B's "Shared with me" in the Google Picker for
+  desktop/mobile apps (`AuthorizationRequest` + `PICKER_OAUTH_TRIGGER`, Android's
+  Play Services Identity API — no Flutter plugin exists for this; it required
+  native Kotlin platform-channel code, and has no iOS equivalent at all).
+- Account B selected that folder via the Picker (`PICKER_ALLOW_FOLDER_SELECTION`)
+  and completed the OAuth consent grant, producing a valid `drive.file`-scoped
+  access token.
+- That token: succeeded on `drive/v3/about` (HTTP 200 — the token itself is valid
+  and correctly authenticated as Account B); failed on `files.get` for the picked
+  folder's own id (HTTP 404); failed on `files.get` for a file that existed inside
+  that folder *before* the grant (HTTP 404).
+
+Conclusion: selecting a shared folder through the Picker does not grant read
+access to it via the Drive API — not to the folder object itself, let alone its
+contents. The broader (non-`drive.file`) `drive` scope would fix this but requires
+an annual third-party CASA security assessment (~$540/year minimum) — ruled out on
+cost for a small app. One variant was identified but not pursued further: sharing
+and picking a specific *file* directly, rather than a folder, since `drive.file`'s
+own scope description is "files that you open... with an app" and folder-selection
+in the Picker may only be intended for choosing a save destination. The team chose
+to commit to R2 rather than continue investigating Drive.
+
+**Why R2.** Cost-modeled against real 2026 pricing rather than reasoning from fear
+of Firebase Storage specifically (see table below). R2 has unconditional $0 egress,
+which matters because this app's usage is egress-heavy — parents repeatedly
+browsing photo galleries, not a write-once-read-never pattern. Backblaze B2 is
+cheaper on raw storage and was seriously considered, but its free-egress allowance
+is capped at 3x monthly storage rather than unconditional; R2 was preferred for the
+simpler, harder-to-blow-through cost model. Firebase Storage was reconsidered on
+its actual numbers and lost on cost at scale, not on assumption.
+
+| Backend | @1,000 books | @10,000 books | Egress model |
+|---|---|---|---|
+| Firebase Storage | ~$38/mo | ~$380/mo | $0.026/GB storage + $0.12/GB egress (first 1TB tier) |
+| **Cloudflare R2 (chosen)** | ~$15-20/mo | ~$150-200/mo | $0.015/GB storage, **$0 egress** |
+| Backblaze B2 | ~$6/mo | ~$60/mo | $0.006/GB storage, free egress up to 3x storage/mo |
+
+(2026 pricing; ~1GB/book/year assumption at 2 photos/memory, ~200 memories/year,
+~2MB/photo after compression.)
+
+**Consequence:** this reintroduces a real, use-scaling hosting cost that Drive's
+model was specifically chosen to avoid. §10.2's monetization item is now
+load-bearing, not a someday-item.
+
+**Target architecture (design only — build during the actual migration):**
+
+- **The client never holds R2 credentials.** A small signing backend (a Cloud
+  Function, alongside the existing Firebase project) is the only thing with R2
+  write/delete access. It authenticates the caller via their Firebase ID token and
+  checks Firestore book membership before issuing anything. This is R2's
+  equivalent of "Firestore and storage security rules enforce authorization
+  server-side on every read and write" (§12) — R2 has no native per-object rules
+  engine, so the signing backend *is* the security boundary.
+- **Upload:** client asks the backend for a short-lived presigned PUT URL for a
+  known object key, uploads the original and the client-generated thumbnail
+  directly to R2, then writes the `PhotoReference` to Firestore. The existing
+  upload-then-write-then-rollback-on-failure order in `MemoryService.saveMemory`
+  carries over unchanged — only what `PhotoStorageService` talks to changes.
+- **Download:** client asks the backend for a short-lived presigned GET URL per
+  photo. **No permanent public URLs** (§12, hard rule) — R2 supports a public
+  bucket/custom domain, but that option is off the table for this reason alone.
+- **Delete:** routed through the backend, never done client-side, for the same
+  reason upload and download are signed rather than direct.
+- **Object keys** mirror the current Drive folder convention —
+  `books/{bookId}/{photoId}-original.{ext}` and
+  `books/{bookId}/{photoId}-thumb.jpg` — so authorization checks and cleanup stay
+  keyed on `bookId`, the same way `GoogleDriveService` keys on it today via Drive
+  `appProperties`.
+- **This is also what finally satisfies §11 properly:** access is gated on
+  Firestore book membership, not on whose personal cloud account a photo happens
+  to live in — the exact problem that made Drive unworkable for a shared book.
+- Keep "bring your own storage" as an optional later mode; not required for the
+  migration itself.
 
 ---
 
@@ -308,29 +395,19 @@ operating only on files the app created, and never scan unrelated Drive content.
 Nothing in this section should be silently resolved in code. Propose, then record
 the decision here.
 
-### 10.1 Photo storage — blocking
+### 10.1 Photo storage — resolved, see §9.3
 
-Google Drive as the photo store may be incompatible with the shared-book requirement
-(§11). The `drive.file` scope grants an app access only to files it created for that
-specific user, so a second parent's app instance would not be able to read the first
-parent's photo. Broader scopes are "restricted" and require an annual third-party
-security assessment.
-
-**Action:** verify this against Google's current OAuth scope and API Services User
-Data Policy documentation before further Drive work. If confirmed, evaluate
-object storage with low or zero egress cost (for example Cloudflare R2 or Backblaze B2)
-combined with aggressive compression, and keep "bring your own storage" as an optional
-later mode.
-
-Run the actual cost math with real assumptions rather than reasoning from fear of
-Firebase Storage pricing specifically.
+Closed 2026-08-30: Cloudflare R2, replacing Google Drive. Decision, evidence, cost
+math, and target architecture are recorded in §9.3, not here — this entry is kept
+only so existing cross-references to "§10.1" still land somewhere meaningful.
+Migration itself is not yet implemented; `GoogleDriveService` remains in use for
+the current milestone (§21).
 
 ### 10.2 Other open items
 
 - Photo compression policy and maximum photos per memory *(high leverage — affects
   cost, timeline performance, upload reliability, and print quality at once)*
 - Thumbnail generation architecture
-- Sign-in method: Email/Password, Google, Apple, or a combination
 - Whether co-parent sharing enters the first vertical slice or immediately after
 - Member invitation UX and owner transfer
 - Behavior when a collaborator disconnects their photo storage
@@ -341,7 +418,9 @@ Firebase Storage pricing specifically.
 - Home screen layout for one book vs. several
 - Whether Generate Book is always available or gets a special CTA near age one
 - **Monetization model** — currently unspecified anywhere. The natural fit is free
-  capture, paid PDF export or printed book. This decision materially affects §10.1.
+  capture, paid PDF export or printed book. Now load-bearing, not just a nice-to-have:
+  §9.3's R2 decision gives the operator a real, use-scaling hosting cost that Drive
+  didn't have.
 - **PDF rendering approach** — client-side vs. server-side. Flutter's `pdf` package has
   weak RTL shaping and bidi handling. Prototype a Hebrew page early, before building
   an editor on top of an approach that cannot render it.
@@ -363,7 +442,10 @@ with "who wrote what" unless it proves useful.
 
 **Do not weaken this product requirement just because photo-store ownership makes it
 harder.** Once a photo is part of a shared book, authorized members should be able to
-see and manage it appropriately. The technical mechanism is open (§10.1).
+see and manage it appropriately. The technical mechanism is Cloudflare R2 (§9.3):
+access gated on Firestore book membership via a signing backend, not on whose
+personal cloud account a photo happens to live in — this is precisely why Google
+Drive could not satisfy this requirement.
 
 Additional family roles, such as read-only access for grandparents, come later.
 
@@ -611,6 +693,7 @@ Storage authorization screens may obviously name the provider when required.
 
 | Topic | Decision |
 |---|---|
+| Sign-in method | Email/Password and Google (linkable either direction); Google grants Drive access in the same consent step. Apple not yet planned. |
 | Capture method | Free-form. Never a mandatory questionnaire. |
 | Memory contents | Text and/or photos, plus a date. |
 | Ordering | Chronological by memory date, editable. |
@@ -620,7 +703,7 @@ Storage authorization screens may obviously name the provider when required.
 | After age one | The same book continues. |
 | Hebrew | Core feature, including RTL in the book itself. |
 | Data storage | Cloud-first with local cache. |
-| Photo storage | **Reopened — see §10.1.** |
+| Photo storage | Cloudflare R2 — see §9.3. Not yet implemented. |
 
 ---
 
