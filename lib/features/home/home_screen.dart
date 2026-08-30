@@ -158,10 +158,21 @@ class _HomeScreenState extends State<HomeScreen> {
           final books = snapshot.data ?? [];
 
           if (books.isEmpty) {
-            return const Center(
-              child: Text(
-                'No books yet.\nCreate your first one!',
-                textAlign: TextAlign.center,
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.menu_book_outlined,
+                    size: 48,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'No books yet.\nCreate your first one!',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             );
           }
@@ -172,36 +183,57 @@ class _HomeScreenState extends State<HomeScreen> {
             itemBuilder: (context, index) {
               final book = books[index];
 
-              return Card(
-                key: ValueKey(book.bookId),
-                child: ListTile(
-                  title: Text(book.childName),
-                  subtitle: Text('Born ${formatShortDate(book.birthDate)}'),
-                  trailing: PopupMenuButton<String>(
-                    onSelected: (value) {
-                      if (value == 'rename') {
-                        _renameBook(book);
-                      } else if (value == 'delete') {
-                        _deleteBook(book);
-                      }
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Card(
+                  key: ValueKey(book.bookId),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    leading: CircleAvatar(
+                      radius: 24,
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.secondaryContainer,
+                      child: Icon(
+                        Icons.child_care,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSecondaryContainer,
+                      ),
+                    ),
+                    title: Text(book.childName),
+                    subtitle: Text('Born ${formatShortDate(book.birthDate)}'),
+                    trailing: PopupMenuButton<String>(
+                      onSelected: (value) {
+                        if (value == 'rename') {
+                          _renameBook(book);
+                        } else if (value == 'delete') {
+                          _deleteBook(book);
+                        }
+                      },
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(
+                          value: 'rename',
+                          child: Text('Rename Book'),
+                        ),
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: Text('Delete Book'),
+                        ),
+                      ],
+                    ),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => BookScreen(book: book),
+                        ),
+                      );
                     },
-                    itemBuilder: (context) => const [
-                      PopupMenuItem(
-                        value: 'rename',
-                        child: Text('Rename Book'),
-                      ),
-                      PopupMenuItem(
-                        value: 'delete',
-                        child: Text('Delete Book'),
-                      ),
-                    ],
                   ),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => BookScreen(book: book)),
-                    );
-                  },
                 ),
               );
             },

@@ -124,14 +124,22 @@ This is the main day-to-day screen. The child/book appears at the top, the memor
 list in the middle, and a prominent, always-reachable **Add** button.
 
 - Chronological list of all memories.
-- Each item shows: memory date, a short text preview if there is text, and small
-  photo previews if there are photos.
+- Every card renders at the same fixed height regardless of how much text or how
+  many photos the memory has, so the timeline reads as a uniform list rather than
+  cards that grow with content.
+- Each item shows: memory date, a short text preview if there is text (or a plain
+  "Photo memory" placeholder if there is only photos), and a single small photo
+  thumbnail if there are photos, with a "+N" badge when there is more than one —
+  not a row of previews, so photo count never changes the card's size.
+- A photo-less card shows a small placeholder icon in the same thumbnail slot
+  instead of collapsing, keeping every card's layout identical.
 - Tapping an item opens the full memory view with Edit / Delete available.
 - Add is reachable without passing through a questionnaire or wizard.
 
-**Performance rule:** a timeline card shows at most **2–3 small, low-resolution
-previews** even when the memory has many photos. The full memory view shows all
-photos. Never render the timeline by downloading full-resolution images.
+**Performance rule:** a timeline card downloads and renders only a single small,
+low-resolution thumbnail per memory (never more, regardless of photo count). The
+full memory view shows all photos. Never render the timeline by downloading
+full-resolution images.
 
 ### 7.3 Add Memory
 
