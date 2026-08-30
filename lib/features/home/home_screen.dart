@@ -8,9 +8,10 @@ import '../../data/services/book_service.dart';
 import '../../models/book.dart';
 import '../../utils/date_format.dart';
 import '../../utils/error_messages.dart';
-import '../books/create_book_screen.dart';
+import '../books/book_form_screen.dart';
 import '../books/book_screen.dart';
 import '../../services/google_drive_service.dart';
+import '../../widgets/drive_image.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -247,29 +248,29 @@ class _HomeScreenState extends State<HomeScreen> {
                       horizontal: 16,
                       vertical: 8,
                     ),
-                    leading: CircleAvatar(
-                      radius: 24,
-                      backgroundColor: Theme.of(
-                        context,
-                      ).colorScheme.secondaryContainer,
-                      child: Icon(
-                        Icons.child_care,
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.onSecondaryContainer,
-                      ),
-                    ),
+                    leading: _BookAvatar(book: book),
                     title: Text(book.childName),
                     subtitle: Text('Born ${formatShortDate(book.birthDate)}'),
                     trailing: PopupMenuButton<String>(
                       onSelected: (value) {
                         if (value == 'rename') {
                           _renameBook(book);
+                        } else if (value == 'edit') {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => BookFormScreen(book: book),
+                            ),
+                          );
                         } else if (value == 'delete') {
                           _deleteBook(book);
                         }
                       },
                       itemBuilder: (context) => const [
+                        PopupMenuItem(
+                          value: 'edit',
+                          child: Text('Edit Book Info'),
+                        ),
                         PopupMenuItem(
                           value: 'rename',
                           child: Text('Rename Book'),
@@ -300,10 +301,45 @@ class _HomeScreenState extends State<HomeScreen> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const CreateBookScreen()),
+            MaterialPageRoute(builder: (_) => const BookFormScreen()),
           );
         },
         child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+
+/// The book's cover photo (spec §7.1/§7.2) where one is set, falling back to
+/// the baby icon placeholder.
+class _BookAvatar extends StatelessWidget {
+  const _BookAvatar({required this.book});
+
+  final Book book;
+
+  @override
+  Widget build(BuildContext context) {
+    final coverPhoto = book.coverPhoto;
+
+    if (coverPhoto == null) {
+      return CircleAvatar(
+        radius: 24,
+        backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+        child: Icon(
+          Icons.child_care,
+          color: Theme.of(context).colorScheme.onSecondaryContainer,
+        ),
+      );
+    }
+
+    return ClipOval(
+      child: SizedBox(
+        width: 48,
+        height: 48,
+        child: DriveImage(
+          fileId: coverPhoto.thumbnailFileId ?? coverPhoto.originalFileId,
+          fit: BoxFit.cover,
+        ),
       ),
     );
   }

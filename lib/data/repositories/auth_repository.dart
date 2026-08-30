@@ -1,8 +1,27 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../models/app_user.dart';
 import '../../services/google_drive_service.dart';
+
+/// Thrown by [AuthRepository.signInWithGoogle] when the Google account's
+/// email already belongs to an existing email/password Baby Book account.
+/// The UI should ask for that account's password and call
+/// [AuthRepository.resolveGoogleAccountConflict] to link them, rather than
+/// just reporting failure — the Google sign-in itself already succeeded,
+/// only the Firebase-side linking step needs the password to proceed safely.
+class GoogleAccountConflict implements Exception {
+  GoogleAccountConflict({
+    required this.email,
+    required this.pendingCredential,
+    required this.googleAccount,
+  });
+
+  final String email;
+  final AuthCredential pendingCredential;
+  final GoogleSignInAccount googleAccount;
+}
 
 class AuthRepository {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -74,16 +93,50 @@ class AuthRepository {
         userCredential = await _auth.signInWithCredential(credential);
       }
     } on FirebaseAuthException catch (e) {
-      if (e.code == 'account-exists-with-different-credential') {
-        throw Exception(
-          'An account with this email already exists. Log in with your '
-          'email and password first — Google sign-in can then be linked to '
-          'it from the home screen.',
+      if (e.code == 'account-exists-with-different-credential' &&
+          e.email != null) {
+        throw GoogleAccountConflict(
+          email: e.email!,
+          pendingCredential: credential,
+          googleAccount: account,
         );
       }
       rethrow;
     }
 
+    return _finishGoogleSignIn(userCredential, account, driveService);
+  }
+
+  /// Completes a Google sign-in that hit a [GoogleAccountConflict]: signs
+  /// into the existing email/password account with [password], then links
+  /// the Google credential to it — so the two providers end up on the same
+  /// Baby Book identity instead of the user needing to separately visit
+  /// "Link Google Account" afterwards.
+  Future<AppUser> resolveGoogleAccountConflict({
+    required GoogleAccountConflict conflict,
+    required String password,
+  }) async {
+    final userCredential = await _auth.signInWithEmailAndPassword(
+      email: conflict.email,
+      password: password,
+    );
+
+    final linkedCredential = await userCredential.user!.linkWithCredential(
+      conflict.pendingCredential,
+    );
+
+    return _finishGoogleSignIn(
+      linkedCredential,
+      conflict.googleAccount,
+      GoogleDriveService(),
+    );
+  }
+
+  Future<AppUser> _finishGoogleSignIn(
+    UserCredential userCredential,
+    GoogleSignInAccount account,
+    GoogleDriveService driveService,
+  ) async {
     final firebaseUser = userCredential.user;
 
     if (firebaseUser == null) {

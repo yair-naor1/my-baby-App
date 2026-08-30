@@ -118,6 +118,12 @@ at birth, the birth story, and a cover photo.
 Do not hard-code the app around exactly one child or one book. The Home screen is a
 list of books, normally one per child.
 
+**Implemented UI direction:** one form handles both create and edit (same
+Add/Edit-reuses-one-form pattern as §7.4), reachable after creation via each book's
+"Edit Book Info" menu item. The optional birth photos are a single gallery — the
+cover photo isn't a separate upload, it's whichever birth photo the parent taps a
+star on (defaults to the first one added if none is chosen).
+
 ### 7.2 Book screen (the timeline)
 
 This is the main day-to-day screen. The child/book appears at the top, the memory
@@ -195,7 +201,12 @@ The app should avoid, or later clean up, orphaned files.
 
 Around the monthly anniversary of the birth date, send a push notification such as
 "Noa is 6 months old! What's new?" Tapping it opens the Add Memory flow for the
-correct book. Not an immediate development priority.
+correct book.
+
+**Decided, not yet built (§20):** also send an inactivity nudge per book — if more
+than 3 weeks pass without a new memory being added to that book, send a reminder
+that it's been a while. Both need a scheduled Cloud Function plus client-side FCM
+token registration.
 
 ---
 
@@ -271,7 +282,7 @@ local cache.
 | Firebase Authentication | Baby Book account, sign-in, UID |
 | Cloud Firestore | Books, memories, text, dates, membership, photo metadata |
 | Cloud Messaging | Push notifications for monthly reminders |
-| Cloud Functions / Cloud Run | Future backend work: cleanup, PDF generation, thumbnails |
+| Cloud Functions / Cloud Run | `enhanceMemoryText` (§15, deployed but not yet working — see known issues §20) live; cleanup, PDF generation, thumbnails still future work |
 | Local cache | Fast reads, weak-connection use, save/upload queue |
 
 **Why not store everything only on the phone:** losing or replacing a phone must not
@@ -532,6 +543,14 @@ AI-generated narrative.
 
 If text rewriting is ever added, it must be explicit and opt-in.
 
+**Implemented (§20 has current status):** an "Enhance text" button in Add/Edit
+Memory calls `functions/enhanceMemoryText` (Gemini 2.5 Flash-Lite, free tier — no
+per-request cost), which returns 3 alternative phrasings for the parent to pick
+from or dismiss; nothing is ever applied automatically. The prompt is the actual
+enforcement point for the "not acceptable" list above — it explicitly forbids
+inventing detail, changing meaning/length, or translating, and requires 3
+genuinely different phrasings rather than trivial word swaps.
+
 ---
 
 ## 16. Non-functional requirements
@@ -594,36 +613,65 @@ Already built:
 
 - Flutter app created
 - Firebase project connected
-- Firebase Auth work
+- Firebase Auth work, including Google sign-in with silent account persistence
+  (§9.2) and Drive access granted in the same consent step
 - Firestore-based Book repository
-- Home screen listing books
-- Book creation flow
-- Book screen
+- Home screen listing books, showing each book's cover photo (§7.1/§7.2)
+- Book creation/edit flow, including the optional birth-info questions and
+  birth photo gallery (§7.1)
+- Book screen, with the cover photo shown at the top of the album
 - Memory model and Memory repository
-- Add/Edit Memory form work
+- Add/Edit Memory form work, tap-to-edit + a delete icon on the card (§7.4)
 - Image picker integration
 - Google Drive service and Drive photo upload
 - Drive photo references connected to memories
 - `firebase_storage` dependency removed
+- First Cloud Function (`functions/enhanceMemoryText`, §15) deployed — calls
+  Gemini 2.5 Flash-Lite (free tier) for opt-in text-suggestion rewrites
 
 Files seen during development (verify against Git for exact current names):
 
 ```
 lib/features/home/home_screen.dart
 lib/features/books/book_screen.dart
+lib/features/books/book_form_screen.dart
 lib/features/memories/...
 lib/data/repositories/memory_repository.dart
+lib/data/repositories/book_repository.dart
+lib/data/services/book_service.dart
 lib/models/memory.dart
+lib/models/book.dart
 lib/services/google_drive_service.dart
+lib/services/ai_text_enhancement_service.dart
+functions/index.js
 ```
 
 ### Known unfinished work
 
-Google account persistence and silent restoration. The user must not be asked to pick
-a Google account on every app launch or every photo upload — the service should restore
-the previous account silently and only prompt when authorization genuinely cannot be
-recovered. An analyzer error existed around accessing `.email` on a nullable restored
-account. Inspect the current Git state before writing a new implementation.
+- **Google sign-in fails for an account already linked to an existing
+  email/password Baby Book account**, even after clearing local app data to
+  rule out stale on-device state: `signInWithCredential` (not
+  `linkWithCredential` — nobody is signed in at the point this fires) throws
+  `FirebaseAuthException` with code `unknown` and message containing
+  `PROVIDER_ALREADY_LINKED`. A `GoogleAccountConflict` path was added to
+  `AuthRepository.signInWithGoogle` for the *different*
+  `account-exists-with-different-credential` case (prompts for the existing
+  account's password and links) and works for that case, but does not cover
+  this one. Root cause not yet found — temporary diagnostic logging is left
+  in `auth_choice_screen.dart` (`[auth-diagnostic]` prefix) to pick this back
+  up.
+- **AI text enhancement (`enhanceMemoryText`) deploys successfully but the
+  Gemini API call 401s** with "Expected OAuth 2 access token" — evidence
+  points at the API key not reaching `@google/genai`'s client, which then
+  silently falls back to the Cloud Function's ambient Google credentials
+  (which aren't valid for the Gemini Developer API's key-based auth). A
+  diagnostic log line (`GEMINI_API_KEY diagnostic:`) was added to `index.js`
+  to confirm whether the secret is actually resolving at runtime — not yet
+  captured/resolved.
+- **Push notifications (§7.6) not started.** Monthly birth-anniversary
+  reminders and a 3-week-inactivity nudge per book both need a scheduled
+  Cloud Function plus client-side FCM token registration; deferred until the
+  Cloud Functions issues above are resolved, since they'd share that setup.
 
 ---
 

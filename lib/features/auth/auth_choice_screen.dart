@@ -26,13 +26,64 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen> {
     try {
       await _authRepository.signInWithGoogle();
       // AuthGate's authStateChanges() listener takes it from here.
-    } catch (e) {
+    } on GoogleAccountConflict catch (conflict) {
+      await _resolveAccountConflict(conflict);
+    } catch (e, stack) {
+      // TEMP diagnostic — remove once #4 is confirmed fixed.
+      debugPrint('[auth-diagnostic] ${e.runtimeType}: $e');
+      debugPrint('[auth-diagnostic] $stack');
+
       if (!mounted) return;
 
       setState(() {
         _errorMessage = friendlyErrorMessage(
           e,
           fallback: 'Could not sign in with Google. Please try again.',
+        );
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSigningInWithGoogle = false;
+        });
+      }
+    }
+  }
+
+  /// [conflict.email] already has a Baby Book account signed in with a
+  /// password — the Google sign-in itself already succeeded, so rather than
+  /// just reporting failure, ask for that password right here and link the
+  /// two so this account works with either method going forward.
+  Future<void> _resolveAccountConflict(GoogleAccountConflict conflict) async {
+    if (!mounted) return;
+
+    final password = await showDialog<String>(
+      context: context,
+      builder: (context) => _PasswordPromptDialog(email: conflict.email),
+    );
+
+    if (password == null || password.isEmpty) return;
+
+    if (mounted) {
+      setState(() {
+        _isSigningInWithGoogle = true;
+        _errorMessage = null;
+      });
+    }
+
+    try {
+      await _authRepository.resolveGoogleAccountConflict(
+        conflict: conflict,
+        password: password,
+      );
+      // AuthGate's authStateChanges() listener takes it from here.
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _errorMessage = friendlyErrorMessage(
+          e,
+          fallback: 'Could not verify that password. Please try again.',
         );
       });
     } finally {
@@ -129,6 +180,63 @@ class _AuthChoiceScreenState extends State<AuthChoiceScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Asks for the password of an existing email/password account so its
+/// Google sign-in attempt can be linked to it. Returns the entered password,
+/// or null if cancelled.
+class _PasswordPromptDialog extends StatefulWidget {
+  const _PasswordPromptDialog({required this.email});
+
+  final String email;
+
+  @override
+  State<_PasswordPromptDialog> createState() => _PasswordPromptDialogState();
+}
+
+class _PasswordPromptDialogState extends State<_PasswordPromptDialog> {
+  final _passwordController = TextEditingController();
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Confirm your password'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${widget.email} already has a Baby Book account. Enter its '
+            'password once to connect Google sign-in to it.',
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _passwordController,
+            obscureText: true,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Password'),
+            onSubmitted: (value) => Navigator.pop(context, value),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _passwordController.text),
+          child: const Text('Continue'),
+        ),
+      ],
     );
   }
 }

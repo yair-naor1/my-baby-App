@@ -141,7 +141,21 @@ class _BookScreenState extends State<BookScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(widget.book.childName)),
-      body: StreamBuilder<List<Memory>>(
+      body: Column(
+        children: [
+          _BookCoverHeader(book: widget.book),
+          Expanded(child: _buildMemoryList(context)),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _openMemory(null),
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Widget _buildMemoryList(BuildContext context) {
+    return StreamBuilder<List<Memory>>(
         stream: _recentStream,
 
         builder: (context, snapshot) {
@@ -225,10 +239,30 @@ class _BookScreenState extends State<BookScreen> {
             },
           );
         },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _openMemory(null),
-        child: const Icon(Icons.add),
+      );
+  }
+}
+
+/// The book's cover photo (spec §7.1/§7.2) shown at the top when entering
+/// the album. Collapses to nothing when no cover photo is set, so a book
+/// without one loses no space to a placeholder.
+class _BookCoverHeader extends StatelessWidget {
+  const _BookCoverHeader({required this.book});
+
+  final Book book;
+
+  @override
+  Widget build(BuildContext context) {
+    final coverPhoto = book.coverPhoto;
+
+    if (coverPhoto == null) return const SizedBox.shrink();
+
+    return SizedBox(
+      width: double.infinity,
+      height: 160,
+      child: DriveImage(
+        fileId: coverPhoto.thumbnailFileId ?? coverPhoto.originalFileId,
+        fit: BoxFit.cover,
       ),
     );
   }

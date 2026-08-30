@@ -6,6 +6,7 @@ import '../../models/memory.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../../models/photo_reference.dart';
+import '../../services/ai_text_enhancement_service.dart';
 import '../../services/google_drive_service.dart';
 import '../../utils/date_format.dart';
 import '../../utils/error_messages.dart';
@@ -34,6 +35,8 @@ class MemoryFormScreen extends StatefulWidget {
 class _MemoryFormScreenState extends State<MemoryFormScreen> {
   final _textController = TextEditingController();
   final _imagePicker = ImagePicker();
+  final _aiTextEnhancementService = AiTextEnhancementService();
+  bool _isEnhancingText = false;
   final List<XFile> _newPhotos = [];
   final List<PhotoReference> _existingPhotos = [];
   late final MemoryService _memoryService =
@@ -215,6 +218,48 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
       setState(() {
         _memoryDate = selectedDate;
       });
+    }
+  }
+
+  /// Sends the current text to the AI enhancement service and lets the
+  /// parent pick one of a few suggested rewrites — never applied
+  /// automatically (spec §15).
+  Future<void> _enhanceText() async {
+    final text = _textController.text.trim();
+
+    if (text.isEmpty) return;
+
+    setState(() => _isEnhancingText = true);
+
+    try {
+      final suggestions = await _aiTextEnhancementService.enhance(text);
+
+      if (!mounted) return;
+
+      final chosen = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) => _TextSuggestionsSheet(suggestions: suggestions),
+      );
+
+      if (chosen != null) {
+        _textController.text = chosen;
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            friendlyErrorMessage(
+              e,
+              fallback: 'Could not get suggestions. Please try again.',
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isEnhancingText = false);
     }
   }
 
@@ -406,6 +451,31 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
                 alignLabelWithHint: true,
               ),
             ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _textController,
+                builder: (context, value, _) {
+                  final canEnhance =
+                      value.text.trim().isNotEmpty && !_isLoading;
+
+                  return TextButton.icon(
+                    onPressed: (canEnhance && !_isEnhancingText)
+                        ? _enhanceText
+                        : null,
+                    icon: _isEnhancingText
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.auto_awesome, size: 18),
+                    label: const Text('Enhance text'),
+                  );
+                },
+              ),
+            ),
             const SizedBox(height: 20),
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -441,6 +511,48 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
                 child: _isLoading
                     ? const CircularProgressIndicator()
                     : Text(widget.isEditing ? 'Save Changes' : 'Save Memory'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Lets the parent pick one of the AI-suggested rewrites, or dismiss without
+/// changing anything — the suggestion is never applied automatically.
+class _TextSuggestionsSheet extends StatelessWidget {
+  const _TextSuggestionsSheet({required this.suggestions});
+
+  final List<String> suggestions;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Suggested versions',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Pick one, or close this to keep what you wrote.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            ...suggestions.map(
+              (suggestion) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  title: Text(suggestion),
+                  onTap: () => Navigator.pop(context, suggestion),
+                ),
               ),
             ),
           ],
