@@ -3,14 +3,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/book_repository.dart';
-import '../../data/repositories/memory_repository.dart';
-import '../../data/services/book_service.dart';
 import '../../models/book.dart';
 import '../../utils/date_format.dart';
 import '../../utils/error_messages.dart';
 import '../books/book_form_screen.dart';
 import '../books/book_screen.dart';
 import '../../services/google_drive_service.dart';
+import '../../services/notification_service.dart';
 import '../../widgets/drive_image.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -24,14 +23,17 @@ class _HomeScreenState extends State<HomeScreen> {
   final _bookRepository = BookRepository();
   final _googleDriveService = GoogleDriveService();
   final _authRepository = AuthRepository();
-  late final _bookService = BookService(
-    bookRepository: _bookRepository,
-    memoryRepository: MemoryRepository(),
-    photoStorage: _googleDriveService,
-  );
   late final _booksStream = _bookRepository.watchMyBooks();
   late bool _isGoogleLinked = _checkGoogleLinked();
   bool _isLinkingGoogle = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Fire-and-forget: reminders are best-effort, shouldn't block or fail
+    // the home screen if permission is denied or registration errors out.
+    NotificationService().initialize();
+  }
 
   bool _checkGoogleLinked() {
     return FirebaseAuth.instance.currentUser?.providerData.any(
@@ -76,95 +78,6 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await _googleDriveService.clearSession();
       await FirebaseAuth.instance.signOut();
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(e))));
-    }
-  }
-
-  Future<void> _renameBook(Book book) async {
-    var editedName = book.childName;
-
-    final newName = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Rename Book'),
-          content: TextFormField(
-            initialValue: book.childName,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: "Child's name"),
-            onChanged: (value) {
-              editedName = value;
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final name = editedName.trim();
-
-                if (name.isNotEmpty) {
-                  Navigator.pop(context, name);
-                }
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (newName == null || !mounted) return;
-
-    try {
-      await _bookRepository.updateBookName(
-        bookId: book.bookId,
-        childName: newName,
-      );
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(e))));
-    }
-  }
-
-  Future<void> _deleteBook(Book book) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Delete book?'),
-          content: Text(
-            'Delete ${book.childName} and all memories in this book?\n\n'
-            'This cannot be undone.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    try {
-      await _bookService.deleteBook(book.bookId);
     } catch (e) {
       if (!mounted) return;
 
@@ -251,36 +164,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     leading: _BookAvatar(book: book),
                     title: Text(book.childName),
                     subtitle: Text('Born ${formatShortDate(book.birthDate)}'),
-                    trailing: PopupMenuButton<String>(
-                      onSelected: (value) {
-                        if (value == 'rename') {
-                          _renameBook(book);
-                        } else if (value == 'edit') {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => BookFormScreen(book: book),
-                            ),
-                          );
-                        } else if (value == 'delete') {
-                          _deleteBook(book);
-                        }
-                      },
-                      itemBuilder: (context) => const [
-                        PopupMenuItem(
-                          value: 'edit',
-                          child: Text('Edit Book Info'),
-                        ),
-                        PopupMenuItem(
-                          value: 'rename',
-                          child: Text('Rename Book'),
-                        ),
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Text('Delete Book'),
-                        ),
-                      ],
-                    ),
+                    trailing: const Icon(Icons.chevron_right),
                     onTap: () {
                       Navigator.push(
                         context,

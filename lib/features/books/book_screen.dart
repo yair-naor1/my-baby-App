@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../data/repositories/book_repository.dart';
 import '../../data/repositories/memory_repository.dart';
+import '../../data/services/book_service.dart';
 import '../../data/services/memory_service.dart';
 import '../../models/book.dart';
 import '../../models/memory.dart';
@@ -9,7 +11,9 @@ import '../../services/google_drive_service.dart';
 import '../../utils/date_format.dart';
 import '../../utils/error_messages.dart';
 import '../../widgets/drive_image.dart';
+import '../albums/album_generate_sheet.dart';
 import '../memories/memory_form_screen.dart';
+import 'book_form_screen.dart';
 import 'ideas_screen.dart';
 
 class BookScreen extends StatefulWidget {
@@ -27,10 +31,20 @@ class _BookScreenState extends State<BookScreen> {
   // docs/CODE_REVIEW.md §7.
   static const _pageSize = 30;
 
+  final _bookRepository = BookRepository();
   final _memoryRepository = MemoryRepository();
+  final _photoStorage = GoogleDriveService();
   late final MemoryService _memoryService = MemoryService(
-    photoStorage: GoogleDriveService(),
+    photoStorage: _photoStorage,
     memoryRepository: _memoryRepository,
+  );
+  late final BookService _bookService = BookService(
+    bookRepository: _bookRepository,
+    memoryRepository: _memoryRepository,
+    photoStorage: _photoStorage,
+  );
+  late final Stream<Book?> _bookStream = _bookRepository.watchBook(
+    widget.book.bookId,
   );
   late final Stream<List<Memory>> _recentStream = _memoryRepository
       .watchRecentMemories(widget.book.bookId, limit: _pageSize);
@@ -125,7 +139,7 @@ class _BookScreenState extends State<BookScreen> {
     }
   }
 
-  void _openMemory(Memory? memory) {
+  void _openMemory(Memory? memory, Book book) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -133,46 +147,234 @@ class _BookScreenState extends State<BookScreen> {
           bookId: widget.book.bookId,
           memory: memory,
           memoryService: _memoryService,
-          childGender: widget.book.childGender,
+          childGender: book.childGender,
         ),
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.book.childName),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.info_outline),
-            tooltip: 'Ideas',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => IdeasScreen(book: widget.book),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          _BookCoverHeader(book: widget.book),
-          Expanded(child: _buildMemoryList(context)),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _openMemory(null),
-        child: const Icon(Icons.add),
-      ),
+  void _openIdeas(Book book) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => IdeasScreen(book: book)),
     );
   }
 
-  Widget _buildMemoryList(BuildContext context) {
+  void _editBookInfo(Book book) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => BookFormScreen(book: book)),
+    );
+  }
+
+  Future<void> _renameBook(Book book) async {
+    var editedName = book.childName;
+
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Rename Book'),
+          content: TextFormField(
+            initialValue: book.childName,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: "Child's name"),
+            onChanged: (value) {
+              editedName = value;
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final name = editedName.trim();
+
+                if (name.isNotEmpty) {
+                  Navigator.pop(context, name);
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (newName == null || !mounted) return;
+
+    try {
+      await _bookRepository.updateBookName(
+        bookId: book.bookId,
+        childName: newName,
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(e))));
+    }
+  }
+
+  Future<void> _deleteBook(Book book) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Delete book?'),
+          content: Text(
+            'Delete ${book.childName} and all memories in this book?\n\n'
+            'This cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await _bookService.deleteBook(book.bookId);
+
+      if (!mounted) return;
+
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(e))));
+    }
+  }
+
+  Future<void> _openAlbum(Book book) async {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    List<Memory> memories;
+
+    try {
+      memories = await _memoryRepository.getMemoriesOnce(widget.book.bookId);
+    } catch (e) {
+      if (!mounted) return;
+
+      Navigator.pop(context);
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(e))));
+      return;
+    }
+
+    if (!mounted) return;
+
+    Navigator.pop(context);
+
+    await showAlbumGenerateSheet(
+      context,
+      book: book,
+      memories: memories,
+      photoStorage: _photoStorage,
+    );
+  }
+
+  void _showComingSoon(String feature) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('$feature is coming soon.')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<Book?>(
+      stream: _bookStream,
+      initialData: widget.book,
+      builder: (context, snapshot) {
+        final book = snapshot.data ?? widget.book;
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(book.childName),
+            actions: [
+              PopupMenuButton<String>(
+                onSelected: (value) {
+                  switch (value) {
+                    case 'ideas':
+                      _openIdeas(book);
+                    case 'album':
+                      _openAlbum(book);
+                    case 'album_settings':
+                      _showComingSoon('Album Settings');
+                    case 'print_guide':
+                      _showComingSoon('The printing guide');
+                    case 'share_album':
+                      _showComingSoon('Sharing');
+                    case 'edit_info':
+                      _editBookInfo(book);
+                    case 'rename':
+                      _renameBook(book);
+                    case 'delete':
+                      _deleteBook(book);
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(value: 'ideas', child: Text('Ideas')),
+                  PopupMenuItem(value: 'album', child: Text('Album')),
+                  PopupMenuItem(
+                    value: 'album_settings',
+                    child: Text('Album Settings'),
+                  ),
+                  PopupMenuItem(
+                    value: 'print_guide',
+                    child: Text('Printing Guide'),
+                  ),
+                  PopupMenuItem(
+                    value: 'share_album',
+                    child: Text('Share Album'),
+                  ),
+                  PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: 'edit_info',
+                    child: Text('Edit Book Info'),
+                  ),
+                  PopupMenuItem(value: 'rename', child: Text('Rename Book')),
+                  PopupMenuItem(value: 'delete', child: Text('Delete Book')),
+                ],
+              ),
+            ],
+          ),
+          body: Column(
+            children: [
+              _BookCoverHeader(book: book),
+              Expanded(child: _buildMemoryList(context, book)),
+            ],
+          ),
+          floatingActionButton: FloatingActionButton(
+            onPressed: () => _openMemory(null, book),
+            child: const Icon(Icons.add),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMemoryList(BuildContext context, Book book) {
     return StreamBuilder<List<Memory>>(
         stream: _recentStream,
 
@@ -250,7 +452,7 @@ class _BookScreenState extends State<BookScreen> {
                 child: _MemoryCard(
                   key: ValueKey(memory.memoryId),
                   memory: memory,
-                  onTap: () => _openMemory(memory),
+                  onTap: () => _openMemory(memory, book),
                   onDelete: () => _deleteMemory(memory),
                 ),
               );

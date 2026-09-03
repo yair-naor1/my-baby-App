@@ -151,9 +151,18 @@ list in the middle, and a prominent, always-reachable **Add** button.
   delete icon on the card itself handles Delete (§7.5) — no intermediate detail
   view or menu.
 - Add is reachable without passing through a questionnaire or wizard.
-- An ⓘ ("Ideas") icon in the app bar opens a bank of ~100 age-tagged capture
+- **Options menu (⋮), app bar, top right.** Single menu, not scattered icons —
+  consolidated 2026-09-03 from two places (a standalone Ideas icon here, plus
+  Edit/Rename/Delete that used to live on each book's card on the Home screen)
+  after the user asked for them to live together. Contents, top to bottom:
+  **Ideas**, **Album** (§14), **Album Settings** (stub), **Printing Guide**
+  (stub), **Share Album** (stub, will route to §11's invite flow once built),
+  divider, **Edit Book Info**, **Rename Book**, **Delete Book**. The book
+  screen watches its book live (`BookRepository.watchBook`) so a rename/edit
+  from this menu reflects immediately without reopening the screen.
+- **Ideas**, opened from that menu, is a bank of ~100 age-tagged capture
   prompts across 14 categories (English + Hebrew). Two-level browse: tap the
-  icon to see the 14 category headlines, tap one to see that category's
+  entry to see the 14 category headlines, tap one to see that category's
   prompts (most age-relevant-now ones sorted first, done-first reversed —
   order is frozen at screen-open time so a tap never reshuffles the list
   mid-browse). Tapping a prompt marks it "already captured" in place — a grey,
@@ -221,12 +230,24 @@ The app should avoid, or later clean up, orphaned files.
 
 Around the monthly anniversary of the birth date, send a push notification such as
 "Noa is 6 months old! What's new?" Tapping it opens the Add Memory flow for the
-correct book.
+correct book. After 12 months, switches to a yearly birthday reminder instead of
+continuing monthly (confirmed 2026-09-03 — not indefinite monthly).
 
-**Decided, not yet built (§20):** also send an inactivity nudge per book — if more
-than 3 weeks pass without a new memory being added to that book, send a reminder
-that it's been a while. Both need a scheduled Cloud Function plus client-side FCM
-token registration.
+Also sends an inactivity nudge per book — if more than 3 weeks pass without a new
+memory, a reminder that it's been a while (14-day cooldown between repeat nudges for
+the same book, so it doesn't fire daily once past the threshold).
+
+**Built, not yet deployed or confirmed end-to-end (§20).** `functions/notifications.js`
+(`sendBookReminders`, a daily `onSchedule` Cloud Function) implements both reminder
+types. Client side: `NotificationService` requests permission, registers/refreshes
+the FCM token to `users/{uid}.fcmTokens`, and handles tap-to-open (foreground,
+background, and cold-start via `getInitialMessage`) navigating to Add Memory for the
+book named in the notification's `data.bookId`, using a `navigatorKey` (`lib/
+navigation.dart`) added to `MaterialApp` since notification taps have no
+`BuildContext` of their own. **Not yet done:** deploying the Cloud Function
+(`firebase deploy --only functions` — a deploy is a real-infrastructure action, left
+for explicit user confirmation rather than run automatically), and no on-device
+confirmation yet that a real notification was received and tapped correctly.
 
 ---
 
@@ -445,13 +466,18 @@ the current milestone (§21).
 - Behavior when photo files are deleted externally
 - Offline upload queue implementation
 - iCloud / OneDrive / local-only storage modes
-- Generated book editor UX in detail
 - Home screen layout for one book vs. several
-- Whether Generate Book is always available or gets a special CTA near age one
+- Whether Generate Book is always available or gets a special CTA near age one —
+  partly moot now that Generate/Preview merged into one always-available **Album**
+  menu entry (§14), but the "special CTA near age one" idea itself is still open.
+- **Print vendor compatibility** — see §14's "Print target" note. Albume.co.il under
+  consideration, not committed; needs direct vendor confirmation of whether they even
+  accept a submitted PDF before real compatibility work is worth doing.
 - **Monetization model** — currently unspecified anywhere. The natural fit is free
   capture, paid PDF export or printed book. Now load-bearing, not just a nice-to-have:
   §9.3's R2 decision gives the operator a real, use-scaling hosting cost that Drive
-  didn't have.
+  didn't have. Album generation itself stayed free/client-side specifically to avoid
+  making this more urgent than it already is.
 - **AI enhancement backend (§15) — blocking, temporary state.** Target architecture
   per the "users own their own costs" principle (§4) is BYOK: each user supplies
   their own free Gemini API key, client calls Gemini directly, operator pays and
@@ -478,9 +504,6 @@ the current milestone (§21).
   **Revisit:** switch to real BYOK once Google fixes the Developer API key bug;
   retire the Vertex AI path at that point rather than keeping it as a permanent
   parallel option.
-- **PDF rendering approach** — client-side vs. server-side. Flutter's `pdf` package has
-  weak RTL shaping and bidi handling. Prototype a Hebrew page early, before building
-  an editor on top of an approach that cannot render it.
 - **Competitive positioning** — Tinybeans, FamilyAlbum, Qeepsake, and Lifecake occupy
   this space. The current differentiators appear to be first-class Hebrew/RTL and the
   no-questionnaire philosophy. State this explicitly.
@@ -544,34 +567,112 @@ Hebrew is not a later translation exercise. Build layouts RTL-capable from the s
 
 ## 14. Album generation and PDF
 
-**Not the current priority. Do not start this before memory capture and storage are
-rock solid.**
+**Priority moved up 2026-09-03, by explicit user direction, ahead of §21's original
+ordering** ("stabilize the vertical slice before... album generation"). Recorded here
+rather than silently deviating from that ordering — §21's vertical-slice bar still
+stands as the eventual target; this work happened in parallel because the user asked
+for it directly, not because the bar was met.
 
 The album is built from saved memories, ordered by `memoryDate`. The system does not
 rewrite the story — it finds a good way to present content the parent already created.
 
-Layout must support:
+### Architecture (decided and built, v1)
+
+- **Client-side rendering, no server involved** — matches the "users own their own
+  costs" principle (§4). A prototype (real Hebrew text, real bidi) confirmed the
+  Flutter `pdf` package handles RTL correctly; this closes the "PDF rendering
+  approach" item that used to be open here in §10.2.
+- **One content plan, two renderers.** `AlbumLayoutBuilder` turns a book's memories
+  into an ordered, design-agnostic `List<AlbumPage>` (sealed type: cover page, month
+  divider, memory page) — no image bytes touched, so computing a page count doesn't
+  require downloading a single photo. Two renderers consume that same plan:
+  `AlbumPageWidget` (Flutter widgets, for the in-app viewer) and `AlbumPdfRenderer`
+  (the `pdf` package, for export). Both read the same `AlbumDesignTheme` values, so a
+  design can only be defined once — this is the deliberate answer to "preview must
+  match export": neither renderer decides layout on its own, they only paint what the
+  shared plan already decided.
+- **No persisted album document for v1.** "Generate Album" and "Preview Album" from
+  earlier discussion turned out to be the same action — both just compute the plan
+  fresh from current memories — so they merged into one **Album** entry in the book's
+  options menu (§7.2) rather than staying two. Reopening it after a first generation
+  jumps to the last-used design. No editing, hiding, or reordering yet (see "Album
+  editor" below — that whole feature is deferred, not built).
+- **Timeline grouping by age in months.** Memories are grouped by months-since-birth
+  (not calendar month), with a divider page before each new month — carries a
+  representative photo from that month when one exists. Matches the monthly-reminder
+  convention already used in §7.6.
+- **RTL is detected from content, not `Book.language`.** `BookRepository.createBook`
+  hardcodes `language: 'en'` always — nothing in the app currently sets a book to
+  Hebrew — so trusting that field silently broke RTL for every real Hebrew book
+  (found via on-device testing, not by inspection). `AlbumLayoutBuilder.detectIsRtl`
+  instead checks the child's name and memory text for Hebrew script and treats the
+  whole album as RTL if any is found — a real per-book language field/setting is
+  still open (see Album Settings below).
+- **Three designs, one palette.** `AlbumDesign`: Soft Pastel (plain), Soft Pastel —
+  Minimal (small corner icon accents), Soft Pastel — Framed (scalloped border, accent
+  photo frame, name badge). All three share one `AlbumDesignTheme` and differ only in
+  `coverDecoration` — decoration is scoped to the cover page only for now; extending
+  it to memory/divider pages is a later step. Icons are Lucide (ISC license,
+  `assets/icons/`); the Hebrew font is Noto Sans Hebrew (SIL OFL, `assets/fonts/`) —
+  both real, redistributable, licensed assets, not placeholders.
+- **Photos render at their true aspect ratio** (from `PhotoReference.width`/`height`,
+  already captured at upload time), not cropped to a fixed box — fixed the original
+  "photos are cut" bug for single-photo and cover pages. Multi-photo grid pages still
+  square-crop each photo by design choice (a masonry-style non-cropping grid is
+  requested future work, not yet built).
+- **Thumbnail resolution only for v1** — good enough to prove the renderer out; a
+  print-resolution asset choice for actual export/printing is deferred (photo storage
+  is also mid-migration, §9.3, so this is deliberately not solved twice).
+
+Layout must support (unchanged goal, only single-memory-per-page pages exist so far):
 
 - Text-only memories — integrated naturally between pages, not necessarily a full page.
 - Photo-only memories — may get a date caption only, or appear in a collage.
 - Text + one photo.
 - Text + multiple photos.
-- Several short memories from the same period on one page.
+- Several short memories from the same period on one page — **not yet built**; v1's
+  `AlbumLayoutBuilder` always produces one memory per page (the page model already
+  supports a memory list per page for when this is built).
 - Long text — choose a suitable layout, split safely, or offer to shorten. Never
-  shorten significantly without approval.
+  shorten significantly without approval. **Not yet built** — long text currently just
+  wraps.
 
-### Album editor
+### Print target — open, blocking real compatibility work
 
-After Generate Book the user sees a preview and can edit before export:
+User is considering **Albume.co.il** ("Gananot"/yearbook product line) as a print
+vendor, explicitly not locked in ("could change in the future"). Investigated
+2026-09-03: their public product page gives no evidence of accepting a submitted
+PDF — every signal (`editor.albume.co.il`, "design online in our editor, no download
+needed") points to designing inside their own proprietary web editor instead. Their
+general hardcover book line is A4 portrait, up to 140 pages, but no bleed/margin/DPI
+numbers are public. **Needs direct confirmation with the vendor** before investing
+further in "compatibility" — if they don't accept a PDF upload, matching their trim
+size is the most "compatible" a generated PDF can realistically be.
+
+### Album editor — deferred, not built
+
+Originally scoped for v1, explicitly deferred so a simpler live-preview baseline could
+ship first:
 
 - Edit memory text
 - Add / remove / replace photos
 - Change a date and reflow the book
-- Hide a memory from the album without deleting it from the timeline
+- Hide a memory from the album without deleting it from the timeline (note:
+  `Memory.hiddenFromBook` already exists and is already respected by
+  `AlbumLayoutBuilder` — only the UI to toggle it from the album view is missing)
 - Choose between layouts where simple to implement
 - Regenerate / reflow after a significant change
 
-The PDF must be consistent between preview and final output, including Hebrew and RTL.
+The PDF must be consistent between preview and final output, including Hebrew and
+RTL — see "one content plan, two renderers" above for how v1 enforces this
+structurally rather than by convention.
+
+### Menu stubs — visible, not yet built
+
+The book's options menu (§7.2) also has **Album Settings**, **Printing Guide**, and
+**Share Album**, each currently an honest "coming soon" — shown so the eventual menu
+shape is visible, not because the features exist. Share Album will eventually route to
+the co-parent invite flow (§11), once that itself is built.
 
 ---
 
@@ -657,7 +758,9 @@ Analytics and crash reporting are not yet planned. Add them before launch.
 - Automatic import from Google Photos / Apple Photos by date
 - Optional, opt-in AI suggestions for titles or phrasing
 - Additional themes and book designs
-- Printing and shipping through the app
+- Printing and shipping through the app — Albume.co.il under consideration as a
+  vendor, not committed; see §14's "Print target" note for the open compatibility
+  question
 - Timeline into later childhood with chapters or years
 - Read-only sharing with grandparents and extended family
 - iCloud / OneDrive / local-only photo storage modes
@@ -700,6 +803,19 @@ Already built:
   Hebrew-gender context via `childGender`).
 - Ideas bank (§7.2): ~100 age-tagged prompts, 14 categories, English + Hebrew,
   per-book "already captured" soft checklist.
+- Book screen options menu (§7.2): consolidated Ideas/Album/Album Settings/Printing
+  Guide/Share Album/Edit Book Info/Rename Book/Delete Book into one ⋮ menu, moved off
+  the Home screen's per-card menu.
+- Album generation v1 (§14): client-side, no server cost, 3 designs, month-based
+  timeline grouping, in-app page-by-page viewer, PDF export via the share sheet
+  (`printing` package). Non-editable; see §14 for what's still deferred.
+- Notifications client + backend written (§7.6) — Cloud Function not yet deployed,
+  not yet confirmed end-to-end on a real device.
+- Google sign-in "account picker every launch" bug — root-caused and fixed in
+  `GoogleDriveService._connectSlow` (a destructive `signOut()`/`clearCredentialState()`
+  call in the silent-restore fallback was wiping the exact state needed for the next
+  silent restore). Not yet confirmed on-device; further sign-in UX work paused at the
+  user's request pending confirmation this is even the direction wanted.
 
 Files seen during development (verify against Git for exact current names):
 
@@ -708,17 +824,28 @@ lib/features/home/home_screen.dart
 lib/features/books/book_screen.dart
 lib/features/books/book_form_screen.dart
 lib/features/memories/...
+lib/features/albums/album_page_widget.dart
+lib/features/albums/album_generate_sheet.dart
+lib/features/albums/album_viewer_screen.dart
 lib/data/repositories/memory_repository.dart
 lib/data/repositories/book_repository.dart
 lib/data/services/book_service.dart
 lib/models/memory.dart
 lib/models/book.dart
+lib/models/album_page.dart
+lib/models/album_design.dart
+lib/models/album_design_theme.dart
 lib/services/google_drive_service.dart
 lib/services/ai_text_enhancement_service.dart
+lib/services/album_layout_builder.dart
+lib/services/album_pdf_renderer.dart
+lib/services/notification_service.dart
 lib/data/idea_prompts.dart
 lib/models/idea_prompt.dart
 lib/features/books/ideas_screen.dart
+lib/navigation.dart
 functions/index.js
+functions/notifications.js
 ```
 
 ### Known unfinished work
@@ -743,12 +870,14 @@ functions/index.js
   backend as already used. Fixed by adding `_googleSignIn.signOut()` before
   `authenticate()` (the same pattern `changeAccount()` already used) — deployed,
   awaiting on-device confirmation.
-- **Push notifications (§7.6) not started — next up.** Monthly birth-anniversary
-  reminders (switching to yearly after 12 months — confirmed 2026-09-03, not
-  indefinite monthly) and a 3-week-inactivity nudge per book. Needs a scheduled
-  Cloud Function (brings `firebase-admin` back as a real dependency, for
-  `admin.messaging()`) plus client-side FCM token registration and
-  notification-tap deep-linking into Add Memory.
+- **Push notifications (§7.6) built, not deployed or confirmed.** See §7.6 for what's
+  actually done vs. missing.
+- **Album generation (§14) follow-ups**, roughly in the order they'd matter: deploy
+  is n/a (client-only) but photo resolution is thumbnail-only (print-quality export
+  needs real resolution), decoration is cover-page-only, grid photos still
+  square-crop, the print vendor question is unresolved, and Album Settings/Printing
+  Guide/Share Album are stubs. None of this blocks using the album feature today —
+  it's real, tested, on-device — these are the known gaps, not defects.
 
 ---
 
@@ -771,6 +900,11 @@ or themes:
 12. Delete it safely
 
 Immediately after that: co-parent collaboration, or the Hebrew/RTL foundation.
+
+**Note (2026-09-03):** reminders (§7.6) and album generation v1 (§14) were built
+ahead of this ordering, at the user's explicit direction in-session — not because
+this checklist was confirmed complete. Recorded here rather than silently reordered;
+this checklist is still the bar for calling the core loop itself stable.
 
 ---
 
@@ -829,6 +963,8 @@ Storage authorization screens may obviously name the provider when required.
 | Hebrew | Core feature, including RTL in the book itself. |
 | Data storage | Cloud-first with local cache. |
 | Photo storage | Cloudflare R2 — see §9.3. Not yet implemented. |
+| Album rendering | Client-side, `pdf` package, no server cost — see §14. |
+| Album v1 scope | Non-editable; Generate/Preview merged into one entry — see §14. |
 
 ---
 

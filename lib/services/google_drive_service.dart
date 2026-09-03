@@ -1,4 +1,5 @@
 import 'package:google_sign_in/google_sign_in.dart';
+import 'dart:async';
 import 'dart:io';
 import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
@@ -228,21 +229,18 @@ class GoogleDriveService implements PhotoStorageService {
     GoogleSignInAccount? account;
 
     if (savedEmail != null) {
-      final lightweightAuth = _googleSignIn.attemptLightweightAuthentication();
-
-      if (lightweightAuth != null) {
-        final restoredAccount = await lightweightAuth;
-
-        if (restoredAccount != null && restoredAccount.email == savedEmail) {
-          account = restoredAccount;
-        }
-      }
+      account = await _tryLightweightRestore(savedEmail);
     }
 
-    // No saved account, or Google restored the wrong user's account.
+    // No saved account, or Google couldn't restore it silently. No signOut()
+    // here on purpose: on Android, GoogleSignIn.signOut() calls the native
+    // clearCredentialState(), the same destructive operation disconnect()
+    // uses — calling it here, silently, on every failed restore attempt,
+    // wipes the exact Credential Manager state the *next* attempt would
+    // need, which is what was actually causing the account picker to
+    // reappear on every launch. authenticate() doesn't need a prior
+    // signOut() to work correctly.
     if (account == null) {
-      await _googleSignIn.signOut();
-
       account = await _googleSignIn.authenticate(scopeHint: _scopes);
 
       await _saveDriveEmail(uid: uid, email: account.email);
@@ -260,6 +258,45 @@ class GoogleDriveService implements PhotoStorageService {
     _invalidateClientCache();
 
     return account;
+  }
+
+  /// Restores [savedEmail]'s session without any picker UI, if Google still
+  /// has it available.
+  ///
+  /// Deliberately does NOT trust the `Future` that
+  /// [GoogleSignIn.attemptLightweightAuthentication] returns — the package's
+  /// own docs warn against gating UI decisions on that future's result and
+  /// instead say to rely on the [GoogleSignIn.authenticationEvents] stream,
+  /// which is the actual source of truth for whether a silent restore
+  /// succeeded. (Confirmed the hard way: the previous await-the-future
+  /// version fell back to the interactive picker on effectively every
+  /// launch, which is the exact "why do I have to sign into Google every
+  /// time" symptom this exists to fix.) A bounded wait on the stream is what
+  /// decides when to give up and fall back to the interactive picker instead.
+  Future<GoogleSignInAccount?> _tryLightweightRestore(
+    String savedEmail,
+  ) async {
+    final completer = Completer<GoogleSignInAccount?>();
+
+    final subscription = _googleSignIn.authenticationEvents.listen((event) {
+      if (event is GoogleSignInAuthenticationEventSignIn &&
+          event.user.email == savedEmail &&
+          !completer.isCompleted) {
+        completer.complete(event.user);
+      }
+    });
+
+    // Fire-and-forget by design — see the doc comment above.
+    unawaited(_googleSignIn.attemptLightweightAuthentication());
+
+    final result = await completer.future.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () => null,
+    );
+
+    await subscription.cancel();
+
+    return result;
   }
 
   /// A Drive API client authenticated as the current account, reused across

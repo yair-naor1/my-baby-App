@@ -1,4 +1,9 @@
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const admin = require("firebase-admin");
+
+admin.initializeApp();
+
+exports.sendBookReminders = require("./notifications").sendBookReminders;
 
 // Set by Firebase at deploy/runtime for the function's own project.
 const PROJECT_ID = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
