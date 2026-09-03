@@ -4,24 +4,69 @@ import '../../data/idea_prompts.dart';
 import '../../data/repositories/book_repository.dart';
 import '../../models/book.dart';
 import '../../models/idea_prompt.dart';
-import '../memories/memory_form_screen.dart';
 
-/// The Ideas ((i)) screen: a browsable, tappable bank of memory-capture
-/// prompts (spec §7.3), grouped by category. Never a questionnaire — the
-/// parent can ignore this entirely and just tap Add. Age-relevant prompts
-/// surface first within each category; a manual "used" mark (never
-/// inferred from memory content) moves an idea to the bottom, greyed out.
-class IdeasScreen extends StatefulWidget {
+/// The Ideas ((i)) screen: browse categories, then the prompts within one
+/// (spec §7.2). Never a questionnaire — tapping a prompt just marks it
+/// "already captured / not interested" with a grey strikethrough; it never
+/// navigates anywhere, so browsing ideas can't accidentally interrupt
+/// writing a memory.
+class IdeasScreen extends StatelessWidget {
   const IdeasScreen({super.key, required this.book, this.bookRepository});
 
   final Book book;
   final BookRepository? bookRepository;
 
   @override
-  State<IdeasScreen> createState() => _IdeasScreenState();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Ideas')),
+      body: ListView.builder(
+        itemCount: ideaCategories.length,
+        itemBuilder: (context, index) {
+          final category = ideaCategories[index];
+          final total = ideaPrompts
+              .where((idea) => idea.category == category)
+              .length;
+
+          return ListTile(
+            title: Text(category),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => _CategoryIdeasScreen(
+                    book: book,
+                    category: category,
+                    bookRepository: bookRepository,
+                  ),
+                ),
+              );
+            },
+            subtitle: Text('$total prompts'),
+          );
+        },
+      ),
+    );
+  }
 }
 
-class _IdeasScreenState extends State<IdeasScreen> {
+class _CategoryIdeasScreen extends StatefulWidget {
+  const _CategoryIdeasScreen({
+    required this.book,
+    required this.category,
+    this.bookRepository,
+  });
+
+  final Book book;
+  final String category;
+  final BookRepository? bookRepository;
+
+  @override
+  State<_CategoryIdeasScreen> createState() => _CategoryIdeasScreenState();
+}
+
+class _CategoryIdeasScreenState extends State<_CategoryIdeasScreen> {
   late final BookRepository _bookRepository =
       widget.bookRepository ?? BookRepository();
   late final Stream<Book?> _bookStream = _bookRepository.watchBook(
@@ -45,16 +90,28 @@ class _IdeasScreenState extends State<IdeasScreen> {
     return true;
   }
 
-  void _openAddMemory() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MemoryFormScreen(
-          bookId: widget.book.bookId,
-          childGender: widget.book.childGender,
-        ),
-      ),
-    );
+  /// Sort order is frozen at screen-open time (uses [widget.book]'s snapshot,
+  /// not the live stream) so tapping a prompt never makes it jump position
+  /// mid-browse — only its style changes, live, via [_bookStream]. Already-
+  /// used prompts still start lower down the *next* time this screen opens.
+  late final List<IdeaPrompt> _sortedIdeas = _sortIdeas();
+
+  List<IdeaPrompt> _sortIdeas() {
+    final ageMonths = _childAgeMonths;
+    final usedAtOpen = widget.book.usedIdeaIds;
+
+    return ideaPrompts.where((idea) => idea.category == widget.category).toList()
+      ..sort((a, b) {
+        final aUsed = usedAtOpen.contains(a.id);
+        final bUsed = usedAtOpen.contains(b.id);
+        if (aUsed != bUsed) return aUsed ? 1 : -1;
+
+        final aRelevant = _isRelevantNow(a, ageMonths);
+        final bRelevant = _isRelevantNow(b, ageMonths);
+        if (aRelevant != bRelevant) return aRelevant ? -1 : 1;
+
+        return 0;
+      });
   }
 
   Future<void> _toggleUsed(IdeaPrompt idea, bool used) async {
@@ -72,11 +129,10 @@ class _IdeasScreenState extends State<IdeasScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final ageMonths = _childAgeMonths;
     final isHebrew = widget.book.language == 'he';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Ideas')),
+      appBar: AppBar(title: Text(widget.category)),
       body: StreamBuilder<Book?>(
         stream: _bookStream,
         initialData: widget.book,
@@ -85,65 +141,31 @@ class _IdeasScreenState extends State<IdeasScreen> {
 
           return ListView.builder(
             padding: const EdgeInsets.all(16),
-            itemCount: ideaCategories.length,
-            itemBuilder: (context, categoryIndex) {
-              final category = ideaCategories[categoryIndex];
-              final ideas =
-                  ideaPrompts.where((idea) => idea.category == category).toList()
-                    ..sort((a, b) {
-                      final aUsed = usedIdeaIds.contains(a.id);
-                      final bUsed = usedIdeaIds.contains(b.id);
-                      if (aUsed != bUsed) return aUsed ? 1 : -1;
+            itemCount: _sortedIdeas.length,
+            itemBuilder: (context, index) {
+              final idea = _sortedIdeas[index];
+              final used = usedIdeaIds.contains(idea.id);
+              final text = isHebrew ? idea.textHe : idea.textEn;
+              final outline = Theme.of(context).colorScheme.outline;
 
-                      final aRelevant = _isRelevantNow(a, ageMonths);
-                      final bRelevant = _isRelevantNow(b, ageMonths);
-                      if (aRelevant != bRelevant) return aRelevant ? -1 : 1;
-
-                      return 0;
-                    });
-
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      category,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    ...ideas.map((idea) {
-                      final used = usedIdeaIds.contains(idea.id);
-                      final text = isHebrew ? idea.textHe : idea.textEn;
-
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(
-                          text,
-                          style: used
-                              ? TextStyle(
-                                  color: Theme.of(context).colorScheme.outline,
-                                  decoration: TextDecoration.lineThrough,
-                                )
-                              : null,
-                        ),
-                        leading: IconButton(
-                          icon: Icon(
-                            used
-                                ? Icons.check_circle
-                                : Icons.check_circle_outline,
-                            color: used
-                                ? Theme.of(context).colorScheme.primary
-                                : Theme.of(context).colorScheme.outline,
-                          ),
-                          tooltip: used ? 'Mark as not done' : 'Mark as done',
-                          onPressed: () => _toggleUsed(idea, !used),
-                        ),
-                        onTap: _openAddMemory,
-                      );
-                    }),
-                  ],
+              return ListTile(
+                title: AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeOut,
+                  style:
+                      DefaultTextStyle.of(context).style.merge(
+                        used
+                            ? TextStyle(
+                                color: outline,
+                                decoration: TextDecoration.lineThrough,
+                              )
+                            : const TextStyle(
+                                decoration: TextDecoration.none,
+                              ),
+                      ),
+                  child: Text(text),
                 ),
+                onTap: () => _toggleUsed(idea, !used),
               );
             },
           );

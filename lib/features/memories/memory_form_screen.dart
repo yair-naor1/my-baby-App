@@ -226,9 +226,11 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
     }
   }
 
-  /// Sends the current text to the AI enhancement service and lets the
-  /// parent pick one of a few suggested rewrites — never applied
-  /// automatically (spec §15).
+  /// Opens the AI Editor panel — a single sheet where Translate/Style/Fix
+  /// switch which suggestion is shown without ever closing the panel, per
+  /// the reference the user shared. Applying (or dismissing, at any point)
+  /// is the only way it affects the text field — spec §15's "never applied
+  /// automatically" still holds.
   Future<void> _enhanceText() async {
     final text = _textController.text.trim();
 
@@ -236,41 +238,20 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
 
     setState(() => _isEnhancingText = true);
 
-    try {
-      final suggestions = await _aiTextEnhancementService.enhance(
-        text,
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _EnhancePanel(
+        originalText: text,
         childGender: widget.childGender,
-      );
+        service: _aiTextEnhancementService,
+      ),
+    );
 
-      if (!mounted) return;
+    if (mounted) setState(() => _isEnhancingText = false);
 
-      final chosen = await showModalBottomSheet<String>(
-        context: context,
-        isScrollControlled: true,
-        builder: (context) => _TextSuggestionsSheet(
-          original: text,
-          suggestions: suggestions,
-        ),
-      );
-
-      if (chosen != null) {
-        _textController.text = chosen;
-      }
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            friendlyErrorMessage(
-              e,
-              fallback: 'Could not get suggestions. Please try again.',
-            ),
-          ),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _isEnhancingText = false);
+    if (result != null) {
+      _textController.text = result;
     }
   }
 
@@ -531,61 +512,244 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
   }
 }
 
-const _suggestionStyleLabels = {
-  'natural': 'Natural',
-  'warm': 'Warm',
-  'playful': 'Playful',
-};
+/// A single persistent panel: Translate/Style/Fix switch which suggestion
+/// is shown without ever closing it (matches the reference the user
+/// shared) — Apply is the only thing that returns a result to the caller;
+/// closing any other way (X, back gesture, tap outside) returns null and
+/// leaves the original text untouched.
+class _EnhancePanel extends StatefulWidget {
+  const _EnhancePanel({
+    required this.originalText,
+    required this.childGender,
+    required this.service,
+  });
 
-/// Lets the parent pick one of the AI-suggested rewrites, or dismiss without
-/// changing anything — the suggestion is never applied automatically.
-class _TextSuggestionsSheet extends StatelessWidget {
-  const _TextSuggestionsSheet({required this.original, required this.suggestions});
+  final String originalText;
+  final String? childGender;
+  final AiTextEnhancementService service;
 
-  final String original;
-  final List<TextSuggestion> suggestions;
+  @override
+  State<_EnhancePanel> createState() => _EnhancePanelState();
+}
+
+class _EnhancePanelState extends State<_EnhancePanel> {
+  static const _styles = {'short': 'Short', 'warm': 'Warm', 'playful': 'Playful'};
+
+  String? _mode;
+  String? _style;
+  String? _result;
+  bool _isLoading = false;
+  String? _error;
+
+  Future<void> _selectMode(String mode) async {
+    setState(() {
+      _mode = mode;
+      _style = null;
+      _result = null;
+      _error = null;
+    });
+
+    if (mode != 'style') {
+      await _generate(mode: mode, style: null);
+    }
+  }
+
+  Future<void> _selectStyle(String style) async {
+    setState(() => _style = style);
+    await _generate(mode: 'style', style: style);
+  }
+
+  Future<void> _generate({required String mode, String? style}) async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final result = await widget.service.enhance(
+        widget.originalText,
+        mode: mode,
+        style: style,
+        childGender: widget.childGender,
+      );
+
+      if (!mounted) return;
+
+      setState(() => _result = result);
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _error = friendlyErrorMessage(
+          e,
+          fallback: 'Could not get a suggestion. Please try again.',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.of(context).viewInsets.bottom,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Suggested versions',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Pick one, or keep what you wrote.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
-            Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              color: Theme.of(context).colorScheme.secondaryContainer,
-              child: ListTile(
-                title: Text(original),
-                subtitle: const Text('Keep my original'),
-                onTap: () => Navigator.pop(context),
-              ),
-            ),
-            ...suggestions.map(
-              (suggestion) => Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  title: Text(suggestion.text),
-                  subtitle: Text(
-                    _suggestionStyleLabels[suggestion.style] ??
-                        suggestion.style,
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'AI Editor',
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  onTap: () => Navigator.pop(context, suggestion.text),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: _ModeButton(
+                    icon: Icons.translate,
+                    label: 'Translate',
+                    selected: _mode == 'translate',
+                    onTap: () => _selectMode('translate'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _ModeButton(
+                    icon: Icons.auto_awesome,
+                    label: 'Style',
+                    selected: _mode == 'style',
+                    onTap: () => _selectMode('style'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _ModeButton(
+                    icon: Icons.spellcheck,
+                    label: 'Fix',
+                    selected: _mode == 'fix',
+                    onTap: () => _selectMode('fix'),
+                  ),
+                ),
+              ],
+            ),
+            if (_mode == 'style') ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                children: _styles.entries
+                    .map(
+                      (entry) => ChoiceChip(
+                        label: Text(entry.value),
+                        selected: _style == entry.key,
+                        onSelected: (_) => _selectStyle(entry.key),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
+            const SizedBox(height: 16),
+            if (_isLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              )
+            else if (_error != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(_error!, style: const TextStyle(color: Colors.red)),
+              )
+            else if (_result != null) ...[
+              Text('Result', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 200),
+                child: SingleChildScrollView(child: Text(_result!)),
+              ),
+            ] else
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Text(
+                  'Pick an option above to see a suggestion.',
+                  style: TextStyle(color: colorScheme.outline),
                 ),
               ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _result == null
+                    ? null
+                    : () => Navigator.pop(context, _result),
+                child: const Text('Apply'),
+              ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ModeButton extends StatelessWidget {
+  const _ModeButton({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final foreground = selected
+        ? colorScheme.onPrimaryContainer
+        : colorScheme.onSurfaceVariant;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: selected
+              ? colorScheme.primaryContainer
+              : colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: foreground, size: 20),
+            const SizedBox(height: 4),
+            Text(label, style: TextStyle(color: foreground, fontSize: 12)),
           ],
         ),
       ),

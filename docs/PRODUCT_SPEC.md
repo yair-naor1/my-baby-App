@@ -152,13 +152,17 @@ list in the middle, and a prominent, always-reachable **Add** button.
   view or menu.
 - Add is reachable without passing through a questionnaire or wizard.
 - An ⓘ ("Ideas") icon in the app bar opens a bank of ~100 age-tagged capture
-  prompts across 14 categories (English + Hebrew), grouped by category, most
-  age-relevant-now ones sorted first within each group. A prompt can be
-  manually marked "already captured" (soft checklist, per book, never
-  inferred from memory content — greys out and sorts to the bottom, doesn't
-  disappear). Tapping a prompt opens Add Memory directly. Placed on this
-  screen rather than as an in-Add-Memory overlay (an earlier idea) because
-  age-relevance needs to know which book/child it's for.
+  prompts across 14 categories (English + Hebrew). Two-level browse: tap the
+  icon to see the 14 category headlines, tap one to see that category's
+  prompts (most age-relevant-now ones sorted first, done-first reversed —
+  order is frozen at screen-open time so a tap never reshuffles the list
+  mid-browse). Tapping a prompt marks it "already captured" in place — a grey,
+  animated strikethrough, per book, never inferred from memory content, never
+  removed from view — **it does not navigate anywhere**, so browsing ideas
+  can't interrupt writing a memory (an earlier version opened Add Memory on
+  tap; changed after trying it). Placed on this screen rather than as an
+  in-Add-Memory overlay (the original spec sketch) because age-relevance needs
+  to know which book/child it's for.
 
 **Performance rule:** a timeline card downloads and renders only a single small,
 low-resolution thumbnail per memory (never more, regardless of photo count). The
@@ -586,25 +590,32 @@ AI-generated narrative.
 If text rewriting is ever added, it must be explicit and opt-in.
 
 **Implemented (§20 has current status):** an "Enhance text" button in Add/Edit
-Memory calls `functions/enhanceMemoryText` (Gemini 3.1 Flash-Lite via Vertex AI —
-see §10.2 for why not the Developer API), returning exactly 3 named-style
-rewrites — `natural`, `warm`, `playful` — as structured JSON (`responseSchema`,
-not parsed free text). The UI always shows the parent's original text as a
-selectable, pre-emphasized option alongside the 3 suggestions ("Keep my
-original") — picking any option is explicit, nothing is ever applied
-automatically. The prompt (`SYSTEM_INSTRUCTION` in `functions/index.js`) is the
-actual enforcement point for the "not acceptable" list above, structured as
-numbered hard rules rather than soft guidance: never fabricate/assume beyond
-the input, never drop a stated fact, never touch names/numbers/dates, reply in
-the same language, and — since a first pass read as noticeably AI-generated —
-an explicit list of banned tells (cliché phrases, stacked adjectives, unearned
-exclamation points, unnaturally symmetrical sentences). Each style has a length
-ceiling relative to the input (natural ≈ same length, warm ≤1.4x, playful
-≤0.8x) and trivial/already-clean input is allowed to come back unchanged
-rather than padded. `temperature: 0.5` — deliberately conservative, since a
-fabricated detail is a spec violation, not a quality nitpick. Optional
-`childGender` (§7.1) is passed as a separate grammar-only context line the
-model is instructed never to otherwise reference, for Hebrew agreement.
+Memory opens a single persistent "AI Editor" panel (redesigned from an initial
+version that generated 3 variants up front — reworked to match a UI concept
+the user provided). **Translate / Style / Fix** are three top buttons that
+switch which single suggestion is shown, without ever closing the panel;
+picking "Style" reveals a second row of style chips (currently Short / Warm /
+Playful, deliberately easy to extend — see `STYLE_INSTRUCTIONS` in
+`functions/index.js`). Each button/chip tap calls `functions/enhanceMemoryText`
+(Gemini 3.1 Flash-Lite via Vertex AI — see §10.2 for why not the Developer
+API) for that one action and shows the result inline in the same panel. An
+explicit **Apply** button is the only thing that copies the result into the
+text field — closing the panel any other way (X, back gesture, tap outside)
+leaves the original untouched, satisfying "never applied automatically"
+without needing a dedicated "keep my original" control.
+
+The prompt (`buildSystemInstruction()` in `functions/index.js`) is the actual
+enforcement point for the "not acceptable" list above, built per-mode rather
+than as one static string — "Translate" is the one case that must explicitly
+override the "never translate" rule the other two modes need. Shared hard
+rules across all modes: never fabricate/assume beyond the input, never drop a
+stated fact, never touch names/numbers/dates, and — since a first pass read as
+noticeably AI-generated — an explicit list of banned tells (cliché phrases,
+stacked adjectives, unearned exclamation points, unnaturally symmetrical
+sentences). `temperature: 0.5` — deliberately conservative, since a fabricated
+detail is a spec violation, not a quality nitpick. Optional `childGender`
+(§7.1) is passed as a separate grammar-only context line the model is
+instructed never to otherwise reference, for Hebrew agreement.
 
 ---
 
@@ -681,11 +692,12 @@ Already built:
 - Google Drive service and Drive photo upload
 - Drive photo references connected to memories
 - `firebase_storage` dependency removed
-- First Cloud Function (`functions/enhanceMemoryText`, §15) deployed and
-  **confirmed working end-to-end on-device** — calls Gemini 3.1 Flash-Lite via
-  Vertex AI (§10.2) for opt-in text-suggestion rewrites. Prompt rewritten twice
-  since first landing (hard anti-fabrication rules, per-style length ceilings,
-  Hebrew-gender context) — redeployed but not yet re-confirmed on-device.
+- AI Editor (§15) — `functions/enhanceMemoryText`, Gemini 3.1 Flash-Lite via
+  Vertex AI (§10.2). Confirmed working end-to-end on-device across two rounds
+  of user feedback: the original "3 variants at once" design became the
+  current single-panel Translate/Style/Fix redesign, and the prompt itself
+  was hardened twice (anti-fabrication hard rules, per-style length ceilings,
+  Hebrew-gender context via `childGender`).
 - Ideas bank (§7.2): ~100 age-tagged prompts, 14 categories, English + Hebrew,
   per-book "already captured" soft checklist.
 
@@ -711,11 +723,9 @@ functions/index.js
 
 ### Known unfinished work
 
-- **AI prompt rewrite deployed, not yet re-confirmed on-device.** The prompt
-  changed twice after the original "confirmed working" pass (anti-fabrication
-  hard rules, length ceilings, Hebrew-gender context) — needs `firebase deploy
-  --only functions` plus an on-device retest to confirm the newer prompt
-  behaves as intended, not just that it deploys.
+- **Latest AI Editor panel redesign and Ideas screen tap-animation change are
+  built, installed, not yet confirmed on-device.** No Cloud Function redeploy
+  needed for this round (only client-side changes).
 - **Sharing between parents (§11) has no invite/add-member UI at all.**
   `ownerIds` is created as a single-element array at book creation with no
   code path to add a second person. The Firestore rules already correctly
