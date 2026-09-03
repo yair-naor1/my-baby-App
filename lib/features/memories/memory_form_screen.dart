@@ -19,11 +19,16 @@ class MemoryFormScreen extends StatefulWidget {
   final Memory? memory;
   final MemoryService? memoryService;
 
+  /// 'male', 'female', or null — passed through to AI text enhancement so
+  /// Hebrew grammatical gender comes out right. Never shown in this UI.
+  final String? childGender;
+
   const MemoryFormScreen({
     super.key,
     required this.bookId,
     this.memory,
     this.memoryService,
+    this.childGender,
   });
 
   bool get isEditing => memory != null;
@@ -232,14 +237,20 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
     setState(() => _isEnhancingText = true);
 
     try {
-      final suggestions = await _aiTextEnhancementService.enhance(text);
+      final suggestions = await _aiTextEnhancementService.enhance(
+        text,
+        childGender: widget.childGender,
+      );
 
       if (!mounted) return;
 
       final chosen = await showModalBottomSheet<String>(
         context: context,
         isScrollControlled: true,
-        builder: (context) => _TextSuggestionsSheet(suggestions: suggestions),
+        builder: (context) => _TextSuggestionsSheet(
+          original: text,
+          suggestions: suggestions,
+        ),
       );
 
       if (chosen != null) {
@@ -529,8 +540,9 @@ const _suggestionStyleLabels = {
 /// Lets the parent pick one of the AI-suggested rewrites, or dismiss without
 /// changing anything — the suggestion is never applied automatically.
 class _TextSuggestionsSheet extends StatelessWidget {
-  const _TextSuggestionsSheet({required this.suggestions});
+  const _TextSuggestionsSheet({required this.original, required this.suggestions});
 
+  final String original;
   final List<TextSuggestion> suggestions;
 
   @override
@@ -548,10 +560,19 @@ class _TextSuggestionsSheet extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Pick one, or close this to keep what you wrote.',
+              'Pick one, or keep what you wrote.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              color: Theme.of(context).colorScheme.secondaryContainer,
+              child: ListTile(
+                title: Text(original),
+                subtitle: const Text('Keep my original'),
+                onTap: () => Navigator.pop(context),
+              ),
+            ),
             ...suggestions.map(
               (suggestion) => Card(
                 margin: const EdgeInsets.only(bottom: 8),

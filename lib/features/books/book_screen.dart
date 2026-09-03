@@ -10,6 +10,7 @@ import '../../utils/date_format.dart';
 import '../../utils/error_messages.dart';
 import '../../widgets/drive_image.dart';
 import '../memories/memory_form_screen.dart';
+import 'ideas_screen.dart';
 
 class BookScreen extends StatefulWidget {
   final Book book;
@@ -132,6 +133,7 @@ class _BookScreenState extends State<BookScreen> {
           bookId: widget.book.bookId,
           memory: memory,
           memoryService: _memoryService,
+          childGender: widget.book.childGender,
         ),
       ),
     );
@@ -140,7 +142,23 @@ class _BookScreenState extends State<BookScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.book.childName)),
+      appBar: AppBar(
+        title: Text(widget.book.childName),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'Ideas',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => IdeasScreen(book: widget.book),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
       body: Column(
         children: [
           _BookCoverHeader(book: widget.book),

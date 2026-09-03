@@ -34,7 +34,6 @@ class _BookFormScreenState extends State<BookFormScreen> {
   final _childNameController = TextEditingController();
   final _birthPlaceController = TextEditingController();
   final _birthWeightController = TextEditingController();
-  final _birthHeightController = TextEditingController();
   final _birthStoryController = TextEditingController();
   final _imagePicker = ImagePicker();
 
@@ -51,6 +50,7 @@ class _BookFormScreenState extends State<BookFormScreen> {
 
   DateTime? _birthDate;
   TimeOfDay? _birthTime;
+  String? _childGender;
   String? _coverKey;
   bool _allowPop = false;
   bool _isLoading = false;
@@ -70,10 +70,10 @@ class _BookFormScreenState extends State<BookFormScreen> {
       _childNameController.text = book.childName;
       _birthPlaceController.text = book.birthPlace ?? '';
       _birthWeightController.text = book.birthWeightKg?.toString() ?? '';
-      _birthHeightController.text = book.birthHeightCm?.toString() ?? '';
       _birthStoryController.text = book.birthStory ?? '';
       _birthDate = book.birthDate;
       _birthTime = _parseTime(book.birthTime);
+      _childGender = book.childGender;
       _existingBirthPhotos.addAll(book.birthPhotos);
       _coverKey = book.coverPhoto?.originalFileId;
     }
@@ -122,9 +122,9 @@ class _BookFormScreenState extends State<BookFormScreen> {
     if (book == null) {
       return _birthPlaceController.text.trim().isNotEmpty ||
           _birthWeightController.text.trim().isNotEmpty ||
-          _birthHeightController.text.trim().isNotEmpty ||
           _birthStoryController.text.trim().isNotEmpty ||
           _birthTime != null ||
+          _childGender != null ||
           _existingBirthPhotos.isNotEmpty;
     }
 
@@ -134,6 +134,7 @@ class _BookFormScreenState extends State<BookFormScreen> {
     if (_birthStoryController.text.trim() != (book.birthStory ?? '')) {
       return true;
     }
+    if (_childGender != book.childGender) return true;
     if (_existingBirthPhotos.length != book.birthPhotos.length) return true;
     if (_coverKey != book.coverPhoto?.originalFileId) return true;
 
@@ -267,10 +268,10 @@ class _BookFormScreenState extends State<BookFormScreen> {
             : _birthPlaceController.text.trim(),
         birthTime: _birthTime == null ? null : _formatTime(_birthTime!),
         birthWeightKg: _parseDouble(_birthWeightController.text),
-        birthHeightCm: _parseDouble(_birthHeightController.text),
         birthStory: _birthStoryController.text.trim().isEmpty
             ? null
             : _birthStoryController.text.trim(),
+        childGender: _childGender,
         existingBirthPhotos: _existingBirthPhotos,
         newBirthPhotos: _newBirthPhotos,
         coverPhotoKey: _coverKey,
@@ -309,7 +310,6 @@ class _BookFormScreenState extends State<BookFormScreen> {
     _childNameController.dispose();
     _birthPlaceController.dispose();
     _birthWeightController.dispose();
-    _birthHeightController.dispose();
     _birthStoryController.dispose();
     super.dispose();
   }
@@ -422,32 +422,44 @@ class _BookFormScreenState extends State<BookFormScreen> {
               onTap: _selectBirthTime,
             ),
             const SizedBox(height: 16),
-            Row(
+            Text(
+              'Gender — only used to get Hebrew grammar right when writing '
+              'about your child.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _birthWeightController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Weight (kg)',
-                    ),
+                ChoiceChip(
+                  label: const Text('Boy'),
+                  selected: _childGender == 'male',
+                  onSelected: (selected) => setState(
+                    () => _childGender = selected ? 'male' : null,
                   ),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: TextField(
-                    controller: _birthHeightController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Height (cm)',
-                    ),
+                ChoiceChip(
+                  label: const Text('Girl'),
+                  selected: _childGender == 'female',
+                  onSelected: (selected) => setState(
+                    () => _childGender = selected ? 'female' : null,
                   ),
+                ),
+                ChoiceChip(
+                  label: const Text('Prefer not to say'),
+                  selected: _childGender == null,
+                  onSelected: (selected) =>
+                      setState(() => _childGender = null),
                 ),
               ],
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _birthWeightController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(labelText: 'Weight (kg)'),
             ),
             const SizedBox(height: 16),
             TextField(

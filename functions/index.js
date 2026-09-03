@@ -27,14 +27,27 @@ const VERTEX_ENDPOINT =
 // phrasing polish" and "AI rewrites the parent's story", so keep the
 // constraints here strict and explicit rather than relying on model good
 // behavior alone.
-const SYSTEM_INSTRUCTION = `You help a parent polish a short journal entry for their baby's memory book before it appears in a printed photo album.
+const SYSTEM_INSTRUCTION = `You polish short memory notes that a parent wrote about their baby, for their memory book. You are an editor, not a writer — the memory belongs to the parent.
 
-Rewrite the parent's text into exactly 3 alternative versions, each in a different style:
-- "natural": light touch — fix grammar/spelling only, keep their own sentence structure and word choices wherever possible.
+HARD RULES — never break these:
+1. Never add a fact, detail, sensory description, emotion, person, place, or time that is not already in the original text. Do not assume or infer anything beyond what is written.
+2. Never remove a fact the parent wrote.
+3. Never change names, numbers, dates, ages, or measurements.
+4. Reply in the same language as the input. Never translate.
+5. If the input is very short or already clean and complete, most or all of your 3 versions may be identical (or nearly identical) to the original — do not pad or elaborate just to have something to show.
+6. If a "Grammar context" note is given below, use it only to get Hebrew verb/adjective gender agreement right when the input is Hebrew. Never mention the child's gender, name, or the note itself in your output unless the parent's own original text already did.
+
+LENGTH — stay close to the original's length:
+- "natural": within about 10% of the original length, shorter or longer.
+- "warm": at most about 1.4x the original length.
+- "playful": at most about 0.8x the original length.
+
+STYLES:
+- "natural": light touch — fix grammar/spelling only, keep the parent's own sentence structure and word choices wherever possible. If the text is already correct, return it unchanged.
 - "warm": more feeling than the original, but still sounds like a real, tired parent jotting this down — not a greeting card.
 - "playful": shorter, lighter, works as a caption.
 
-The single biggest failure mode to avoid: sounding like AI-generated text instead of something a real parent actually wrote. Concretely, all mandatory:
+The single biggest failure mode to avoid, in every style: sounding like AI-generated text instead of something a real parent actually wrote. Concretely, all mandatory:
 - No cliché baby-journal phrases — "little one", "precious moment", "heart melted", "filled with joy", "priceless", "growing up so fast", "cherish this", "bundle of joy", or anything in that family — unless the parent's own original text already used it.
 - No stacked adjectives or adverbs ("so incredibly, wonderfully happy"). One honest word beats three flowery ones.
 - No added exclamation points or emotional intensifiers the parent didn't use themselves.
@@ -42,9 +55,9 @@ The single biggest failure mode to avoid: sounding like AI-generated text instea
 - Write in first person, as the parent — never as a narrator describing the parent from outside.
 - Contractions and casual phrasing are welcome where they'd sound natural.
 - Each of the 3 versions must read like a genuinely different way a real parent might phrase this, not the same generic paragraph with synonyms swapped in.
-- Preserve every fact, detail, name, and meaning exactly as stated. Do not invent, assume, or add any detail, milestone, event, or emotion that isn't already in the original text.
-- Do not significantly change the length — a short note stays short, a longer story stays a story.
-- Write in the same language as the input (do not translate). Hebrew input must read naturally and casually in Hebrew — the same anti-cliché, anti-AI-sounding rules apply there too, not just in English.`;
+- Hebrew input must read naturally and casually in Hebrew — every rule above applies there too, not just in English.
+
+Output only the structured result. No markdown, no commentary, no explanation of what you changed.`;
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
@@ -107,6 +120,15 @@ exports.enhanceMemoryText = onCall(
         );
       }
 
+      // 'male'/'female' only, for Hebrew grammatical gender — see HARD RULE 6
+      // in SYSTEM_INSTRUCTION. Never required; absent for most callers today
+      // since the book-level gender field is new and optional.
+      const childGender = request.data && request.data.childGender;
+      const genderContext = (childGender === "male" || childGender === "female")
+        ? `Grammar context: the child is ${childGender}.\n\n`
+        : "";
+      const promptText = `${genderContext}Parent's text:\n"""\n${text}\n"""`;
+
       let accessToken;
       try {
         accessToken = await getAccessToken();
@@ -125,8 +147,13 @@ exports.enhanceMemoryText = onCall(
           },
           body: JSON.stringify({
             systemInstruction: {parts: [{text: SYSTEM_INSTRUCTION}]},
-            contents: [{role: "user", parts: [{text}]}],
+            contents: [{role: "user", parts: [{text: promptText}]}],
             generationConfig: {
+              // Moderate rather than default-creative: a fabricated detail
+              // is a spec §15 violation, not just a quality nitpick, so this
+              // errs conservative even though it costs some of the "warm"/
+              // "playful" variety a higher temperature would give.
+              temperature: 0.5,
               responseMimeType: "application/json",
               responseSchema: RESPONSE_SCHEMA,
             },

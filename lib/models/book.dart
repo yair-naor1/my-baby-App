@@ -14,14 +14,23 @@ class Book {
   final int schemaVersion;
 
   // Optional book-creation questions — spec §7.1: "birth place, birth time,
-  // weight/height at birth, the birth story, and a cover photo."
+  // weight at birth, the birth story, and a cover photo."
   final String? birthPlace;
   final String? birthTime;
   final double? birthWeightKg;
-  final double? birthHeightCm;
   final String? birthStory;
   final PhotoReference? coverPhoto;
   final List<PhotoReference> birthPhotos;
+
+  // 'male', 'female', or null (not specified). Used only to get Hebrew
+  // grammatical gender right in AI text enhancement (spec §15) — never
+  // shown as a label anywhere in the UI.
+  final String? childGender;
+
+  // IdeaPrompt.id values the parent has manually marked as already
+  // captured, in the Ideas ((i)) screen — a soft, user-driven checklist,
+  // never inferred automatically from memory content.
+  final List<String> usedIdeaIds;
 
   Book({
     required this.bookId,
@@ -34,9 +43,10 @@ class Book {
     this.birthPlace,
     this.birthTime,
     this.birthWeightKg,
-    this.birthHeightCm,
     this.birthStory,
     this.coverPhoto,
     this.birthPhotos = const [],
+    this.childGender,
+    this.usedIdeaIds = const [],
   });
 }

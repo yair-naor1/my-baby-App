@@ -113,8 +113,9 @@ user wants to document, but does not enjoy album design or keeping a tidy journa
 ### 7.1 Creating a book
 
 After signing up, the user creates a book and enters at minimum the **child's name**
-and **birth date**. Optional fields may include birth place, birth time, weight/height
-at birth, the birth story, and a cover photo.
+and **birth date**. Optional fields may include birth place, birth time, weight at
+birth, the birth story, and a cover photo. Birth height was tried and dropped
+(2026-09-03) — not a relevant detail for this product.
 
 Do not hard-code the app around exactly one child or one book. The Home screen is a
 list of books, normally one per child.
@@ -124,6 +125,12 @@ Add/Edit-reuses-one-form pattern as §7.4), reachable after creation via each bo
 "Edit Book Info" menu item. The optional birth photos are a single gallery — the
 cover photo isn't a separate upload, it's whichever birth photo the parent taps a
 star on (defaults to the first one added if none is chosen).
+
+Also has an optional child-gender field (boy/girl/prefer not to say) — this is
+**not a product-facing field**, it's never displayed as a label anywhere. Its
+only purpose is getting Hebrew grammatical gender agreement right in AI text
+enhancement (§15); the form copy says so explicitly rather than asking for
+gender as if it were its own meaningful question.
 
 ### 7.2 Book screen (the timeline)
 
@@ -144,6 +151,14 @@ list in the middle, and a prominent, always-reachable **Add** button.
   delete icon on the card itself handles Delete (§7.5) — no intermediate detail
   view or menu.
 - Add is reachable without passing through a questionnaire or wizard.
+- An ⓘ ("Ideas") icon in the app bar opens a bank of ~100 age-tagged capture
+  prompts across 14 categories (English + Hebrew), grouped by category, most
+  age-relevant-now ones sorted first within each group. A prompt can be
+  manually marked "already captured" (soft checklist, per book, never
+  inferred from memory content — greys out and sorts to the bottom, doesn't
+  disappear). Tapping a prompt opens Add Memory directly. Placed on this
+  screen rather than as an in-Add-Memory overlay (an earlier idea) because
+  age-relevance needs to know which book/child it's for.
 
 **Performance rule:** a timeline card downloads and renders only a single small,
 low-resolution thumbnail per memory (never more, regardless of photo count). The
@@ -162,7 +177,7 @@ The screen must stay minimal.
 | Selected photos | Shown as thumbnails; the user can remove one before saving. |
 | Save | Persists the memory and shows it in the list. |
 | Cancel | Exits without saving; warn only if content was already entered. |
-| Ideas (i) | Optional list of prompts. Does not change the main Add screen. |
+| Ideas (i) | See §7.2 — the ⓘ moved to the book screen's app bar, not an overlay here. |
 
 At least some meaningful content (text or a photo) must exist before saving.
 
@@ -574,11 +589,22 @@ If text rewriting is ever added, it must be explicit and opt-in.
 Memory calls `functions/enhanceMemoryText` (Gemini 3.1 Flash-Lite via Vertex AI —
 see §10.2 for why not the Developer API), returning exactly 3 named-style
 rewrites — `natural`, `warm`, `playful` — as structured JSON (`responseSchema`,
-not parsed free text) for the parent to pick from or dismiss; nothing is ever
-applied automatically. The prompt is the actual enforcement point for the "not
-acceptable" list above — it explicitly forbids inventing detail, changing
-meaning/length, or translating, and requires the parent's own voice to come
-through rather than generic AI phrasing.
+not parsed free text). The UI always shows the parent's original text as a
+selectable, pre-emphasized option alongside the 3 suggestions ("Keep my
+original") — picking any option is explicit, nothing is ever applied
+automatically. The prompt (`SYSTEM_INSTRUCTION` in `functions/index.js`) is the
+actual enforcement point for the "not acceptable" list above, structured as
+numbered hard rules rather than soft guidance: never fabricate/assume beyond
+the input, never drop a stated fact, never touch names/numbers/dates, reply in
+the same language, and — since a first pass read as noticeably AI-generated —
+an explicit list of banned tells (cliché phrases, stacked adjectives, unearned
+exclamation points, unnaturally symmetrical sentences). Each style has a length
+ceiling relative to the input (natural ≈ same length, warm ≤1.4x, playful
+≤0.8x) and trivial/already-clean input is allowed to come back unchanged
+rather than padded. `temperature: 0.5` — deliberately conservative, since a
+fabricated detail is a spec violation, not a quality nitpick. Optional
+`childGender` (§7.1) is passed as a separate grammar-only context line the
+model is instructed never to otherwise reference, for Hebrew agreement.
 
 ---
 
@@ -657,9 +683,11 @@ Already built:
 - `firebase_storage` dependency removed
 - First Cloud Function (`functions/enhanceMemoryText`, §15) deployed and
   **confirmed working end-to-end on-device** — calls Gemini 3.1 Flash-Lite via
-  Vertex AI (§10.2) for opt-in text-suggestion rewrites. Prompt wording is still
-  being iterated on (first pass read as noticeably AI-generated; tightened to
-  explicitly ban clichés, stacked adjectives, and unnaturally balanced sentences).
+  Vertex AI (§10.2) for opt-in text-suggestion rewrites. Prompt rewritten twice
+  since first landing (hard anti-fabrication rules, per-style length ceilings,
+  Hebrew-gender context) — redeployed but not yet re-confirmed on-device.
+- Ideas bank (§7.2): ~100 age-tagged prompts, 14 categories, English + Hebrew,
+  per-book "already captured" soft checklist.
 
 Files seen during development (verify against Git for exact current names):
 
@@ -675,11 +703,25 @@ lib/models/memory.dart
 lib/models/book.dart
 lib/services/google_drive_service.dart
 lib/services/ai_text_enhancement_service.dart
+lib/data/idea_prompts.dart
+lib/models/idea_prompt.dart
+lib/features/books/ideas_screen.dart
 functions/index.js
 ```
 
 ### Known unfinished work
 
+- **AI prompt rewrite deployed, not yet re-confirmed on-device.** The prompt
+  changed twice after the original "confirmed working" pass (anti-fabrication
+  hard rules, length ceilings, Hebrew-gender context) — needs `firebase deploy
+  --only functions` plus an on-device retest to confirm the newer prompt
+  behaves as intended, not just that it deploys.
+- **Sharing between parents (§11) has no invite/add-member UI at all.**
+  `ownerIds` is created as a single-element array at book creation with no
+  code path to add a second person. The Firestore rules already correctly
+  support multi-owner books (array-membership check, not "must equal
+  creator") — only the actual invite UI is missing. Untested with a real
+  second device.
 - **Google sign-in `PROVIDER_ALREADY_LINKED` — fix applied, not yet confirmed.**
   An account already linked to Google via an earlier session (either this one's
   own testing, or a real prior link) would fail on a fresh `signInWithCredential`
@@ -691,10 +733,12 @@ functions/index.js
   backend as already used. Fixed by adding `_googleSignIn.signOut()` before
   `authenticate()` (the same pattern `changeAccount()` already used) — deployed,
   awaiting on-device confirmation.
-- **Push notifications (§7.6) not started.** Monthly birth-anniversary
-  reminders and a 3-week-inactivity nudge per book both need a scheduled
-  Cloud Function plus client-side FCM token registration; deferred behind the
-  AI work above since it's the same Cloud Functions surface.
+- **Push notifications (§7.6) not started — next up.** Monthly birth-anniversary
+  reminders (switching to yearly after 12 months — confirmed 2026-09-03, not
+  indefinite monthly) and a 3-week-inactivity nudge per book. Needs a scheduled
+  Cloud Function (brings `firebase-admin` back as a real dependency, for
+  `admin.messaging()`) plus client-side FCM token registration and
+  notification-tap deep-linking into Add Memory.
 
 ---
 

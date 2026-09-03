@@ -19,10 +19,19 @@ class TextSuggestion {
 class AiTextEnhancementService {
   final _functions = FirebaseFunctions.instance;
 
-  Future<List<TextSuggestion>> enhance(String text) async {
+  /// [childGender] ('male'/'female'/null) is used server-side only to get
+  /// Hebrew grammatical gender right — never surfaced in the output text
+  /// unless the parent's own original text already mentioned it.
+  Future<List<TextSuggestion>> enhance(
+    String text, {
+    String? childGender,
+  }) async {
     final callable = _functions.httpsCallable('enhanceMemoryText');
 
-    final result = await callable.call<Map<String, dynamic>>({'text': text});
+    final result = await callable.call<Map<String, dynamic>>({
+      'text': text,
+      'childGender': ?childGender,
+    });
 
     final options = (result.data['options'] as List<dynamic>)
         .cast<Map<Object?, Object?>>();

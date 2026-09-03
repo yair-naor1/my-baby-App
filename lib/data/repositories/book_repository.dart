@@ -22,8 +22,8 @@ class BookRepository {
       birthPlace: data['birthPlace'] as String?,
       birthTime: data['birthTime'] as String?,
       birthWeightKg: (data['birthWeightKg'] as num?)?.toDouble(),
-      birthHeightCm: (data['birthHeightCm'] as num?)?.toDouble(),
       birthStory: data['birthStory'] as String?,
+      childGender: data['childGender'] as String?,
       coverPhoto: data['coverPhoto'] != null
           ? PhotoReference.fromMap(data['coverPhoto'] as Map<String, dynamic>)
           : null,
@@ -31,6 +31,7 @@ class BookRepository {
           .whereType<Map<String, dynamic>>()
           .map(PhotoReference.fromMap)
           .toList(),
+      usedIdeaIds: List<String>.from(data['usedIdeaIds'] as List<dynamic>? ?? []),
     );
   }
 
@@ -40,6 +41,37 @@ class BookRepository {
     if (!doc.exists) return null;
 
     return _bookFromDoc(doc);
+  }
+
+  /// Watches a single book live, so the Ideas screen reflects `usedIdeaIds`
+  /// changes immediately without a manual refresh.
+  Stream<Book?> watchBook(String bookId) {
+    return _firestore
+        .collection('books')
+        .doc(bookId)
+        .snapshots()
+        .map((doc) => doc.exists ? _bookFromDoc(doc) : null);
+  }
+
+  /// Toggles one idea's "already captured" mark — a direct field update,
+  /// not routed through [updateBookInfo], so it stays instant from the
+  /// Ideas screen without touching any other book field.
+  Future<void> setIdeaUsed({
+    required String bookId,
+    required String ideaId,
+    required bool used,
+  }) async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      throw Exception('User is not logged in');
+    }
+
+    await _firestore.collection('books').doc(bookId).update({
+      'usedIdeaIds': used
+          ? FieldValue.arrayUnion([ideaId])
+          : FieldValue.arrayRemove([ideaId]),
+    });
   }
 
   /// Allocates a book id before the Firestore document exists, so photos can
@@ -73,8 +105,8 @@ class BookRepository {
     String? birthPlace,
     String? birthTime,
     double? birthWeightKg,
-    double? birthHeightCm,
     String? birthStory,
+    String? childGender,
     PhotoReference? coverPhoto,
     required List<PhotoReference> birthPhotos,
   }) async {
@@ -90,8 +122,8 @@ class BookRepository {
       'birthPlace': birthPlace,
       'birthTime': birthTime,
       'birthWeightKg': birthWeightKg,
-      'birthHeightCm': birthHeightCm,
       'birthStory': birthStory,
+      'childGender': childGender,
       'coverPhoto': coverPhoto?.toMap(),
       'birthPhotos': birthPhotos.map((photo) => photo.toMap()).toList(),
     });
@@ -142,8 +174,8 @@ class BookRepository {
     String? birthPlace,
     String? birthTime,
     double? birthWeightKg,
-    double? birthHeightCm,
     String? birthStory,
+    String? childGender,
     PhotoReference? coverPhoto,
     List<PhotoReference> birthPhotos = const [],
   }) async {
@@ -160,8 +192,8 @@ class BookRepository {
       'birthPlace': birthPlace,
       'birthTime': birthTime,
       'birthWeightKg': birthWeightKg,
-      'birthHeightCm': birthHeightCm,
       'birthStory': birthStory,
+      'childGender': childGender,
       'coverPhoto': coverPhoto?.toMap(),
       'birthPhotos': birthPhotos.map((photo) => photo.toMap()).toList(),
       'ownerIds': [user.uid],
