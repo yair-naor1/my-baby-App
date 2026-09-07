@@ -8,10 +8,11 @@ import '../../data/repositories/memory_repository.dart';
 import '../../data/services/book_service.dart';
 import '../../models/book.dart';
 import '../../models/photo_reference.dart';
-import '../../services/google_drive_service.dart';
+import '../../services/r2_photo_storage_service.dart';
 import '../../utils/date_format.dart';
 import '../../utils/error_messages.dart';
-import '../../widgets/drive_image.dart';
+import '../../widgets/hebrew_aware_date_picker.dart';
+import '../../widgets/stored_photo_image.dart';
 
 enum _ExitChoice { keepEditing, saveAndExit, exitWithoutSaving }
 
@@ -45,11 +46,13 @@ class _BookFormScreenState extends State<BookFormScreen> {
       BookService(
         bookRepository: BookRepository(),
         memoryRepository: MemoryRepository(),
-        photoStorage: GoogleDriveService(),
+        photoStorage: R2PhotoStorageService(),
       );
 
   DateTime? _birthDate;
   TimeOfDay? _birthTime;
+  String _language = 'en';
+  String _dateDisplay = 'gregorian';
   String? _childGender;
   String? _coverKey;
   bool _allowPop = false;
@@ -73,6 +76,8 @@ class _BookFormScreenState extends State<BookFormScreen> {
       _birthStoryController.text = book.birthStory ?? '';
       _birthDate = book.birthDate;
       _birthTime = _parseTime(book.birthTime);
+      _language = book.language;
+      _dateDisplay = book.dateDisplay;
       _childGender = book.childGender;
       _existingBirthPhotos.addAll(book.birthPhotos);
       _coverKey = book.coverPhoto?.originalFileId;
@@ -124,6 +129,8 @@ class _BookFormScreenState extends State<BookFormScreen> {
           _birthWeightController.text.trim().isNotEmpty ||
           _birthStoryController.text.trim().isNotEmpty ||
           _birthTime != null ||
+          _language != 'en' ||
+          _dateDisplay != 'gregorian' ||
           _childGender != null ||
           _existingBirthPhotos.isNotEmpty;
     }
@@ -134,6 +141,8 @@ class _BookFormScreenState extends State<BookFormScreen> {
     if (_birthStoryController.text.trim() != (book.birthStory ?? '')) {
       return true;
     }
+    if (_language != book.language) return true;
+    if (_dateDisplay != book.dateDisplay) return true;
     if (_childGender != book.childGender) return true;
     if (_existingBirthPhotos.length != book.birthPhotos.length) return true;
     if (_coverKey != book.coverPhoto?.originalFileId) return true;
@@ -204,12 +213,19 @@ class _BookFormScreenState extends State<BookFormScreen> {
   }
 
   Future<void> _selectBirthDate() async {
-    final selectedDate = await showDatePicker(
-      context: context,
-      initialDate: _birthDate ?? DateTime.now(),
-      firstDate: DateTime(2000),
-      lastDate: DateTime.now(),
-    );
+    final selectedDate = _dateDisplay == 'gregorian'
+        ? await showDatePicker(
+            context: context,
+            initialDate: _birthDate ?? DateTime.now(),
+            firstDate: DateTime(2000),
+            lastDate: DateTime.now(),
+          )
+        : await showDatePickerWithHebrew(
+            context: context,
+            initialDate: _birthDate ?? DateTime.now(),
+            firstDate: DateTime(2000),
+            lastDate: DateTime.now(),
+          );
 
     if (selectedDate != null) {
       setState(() => _birthDate = selectedDate);
@@ -263,6 +279,8 @@ class _BookFormScreenState extends State<BookFormScreen> {
         editingBook: widget.book,
         childName: childName,
         birthDate: _birthDate!,
+        language: _language,
+        dateDisplay: _dateDisplay,
         birthPlace: _birthPlaceController.text.trim().isEmpty
             ? null
             : _birthPlaceController.text.trim(),
@@ -395,10 +413,48 @@ class _BookFormScreenState extends State<BookFormScreen> {
               title: Text(
                 _birthDate == null
                     ? 'Select birth date'
-                    : formatShortDate(_birthDate!),
+                    : formatDate(_birthDate!, _dateDisplay),
               ),
               trailing: const Icon(Icons.calendar_today),
               onTap: _selectBirthDate,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Language for Ideas prompts and the generated album.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('English'),
+                  selected: _language == 'en',
+                  onSelected: (selected) {
+                    if (selected) setState(() => _language = 'en');
+                  },
+                ),
+                ChoiceChip(
+                  label: const Text('עברית'),
+                  selected: _language == 'he',
+                  onSelected: (selected) {
+                    if (selected) setState(() => _language = 'he');
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              initialValue: _dateDisplay,
+              decoration: const InputDecoration(labelText: 'Which date to show'),
+              items: const [
+                DropdownMenuItem(value: 'gregorian', child: Text('English')),
+                DropdownMenuItem(value: 'hebrew', child: Text('Hebrew')),
+                DropdownMenuItem(value: 'both', child: Text('Both')),
+              ],
+              onChanged: (value) {
+                if (value != null) setState(() => _dateDisplay = value);
+              },
             ),
             const Divider(height: 32),
             Text(
@@ -494,7 +550,7 @@ class _BookFormScreenState extends State<BookFormScreen> {
 
                   return _photoThumbnail(
                     key: photo.originalFileId,
-                    image: DriveImage(
+                    image: StoredPhotoImage(
                       key: ValueKey(imageId),
                       fileId: imageId,
                       fit: BoxFit.cover,

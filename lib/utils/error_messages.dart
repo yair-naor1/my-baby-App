@@ -1,3 +1,4 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../services/photo_storage_service.dart';
@@ -41,6 +42,16 @@ String friendlyErrorMessage(
     }
 
     return fallback;
+  }
+
+  // Unlike Firebase Auth's built-in messages (many of which are dev/ops
+  // text, hence the allowlist above), every HttpsError thrown across this
+  // app's own Cloud Functions (functions/r2Storage.js, bookSharing.js,
+  // enhanceMemoryText) is already hand-written as safe, user-facing text —
+  // so it's fine to surface unconditionally rather than needing a matching
+  // per-code allowlist here too.
+  if (error is FirebaseFunctionsException) {
+    return error.message ?? fallback;
   }
 
   return fallback;

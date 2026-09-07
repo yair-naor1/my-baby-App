@@ -7,7 +7,7 @@ import '../../models/album_page.dart';
 import '../../models/photo_reference.dart';
 import '../../services/photo_storage_service.dart';
 import '../../utils/date_format.dart';
-import '../../widgets/drive_image.dart';
+import '../../widgets/stored_photo_image.dart';
 
 /// Renders one [AlbumPage] as an in-app Flutter widget — the live/in-app
 /// counterpart to `AlbumPdfRenderer`. Both read the same [AlbumDesignTheme]
@@ -91,7 +91,7 @@ class _FramedPhoto extends StatelessWidget {
       borderRadius: BorderRadius.circular(theme.photoCornerRadius),
       child: AspectRatio(
         aspectRatio: aspectRatio,
-        child: DriveImage(
+        child: StoredPhotoImage(
           fileId: photoRef.thumbnailFileId ?? photoRef.originalFileId,
           photoStorage: photoStorage,
           fit: BoxFit.cover,
@@ -394,7 +394,7 @@ class _MonthDividerContent extends StatelessWidget {
               constraints: const BoxConstraints(maxHeight: 220),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(theme.photoCornerRadius),
-                child: DriveImage(
+                child: StoredPhotoImage(
                   fileId: photo.thumbnailFileId ?? photo.originalFileId,
                   photoStorage: photoStorage,
                   fit: BoxFit.cover,
@@ -464,7 +464,7 @@ class _MemoryPageContent extends StatelessWidget {
                   borderRadius: BorderRadius.circular(
                     theme.photoCornerRadius,
                   ),
-                  child: DriveImage(
+                  child: StoredPhotoImage(
                     fileId: ref.thumbnailFileId ?? ref.originalFileId,
                     photoStorage: photoStorage,
                     fit: BoxFit.cover,

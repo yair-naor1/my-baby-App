@@ -2,8 +2,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
-import '../services/google_drive_service.dart';
 import '../services/photo_storage_service.dart';
+import '../services/r2_photo_storage_service.dart';
 
 /// Small in-memory cache so scrolling a timeline doesn't re-download the
 /// same thumbnail every time `ListView.builder` recycles the widget.
@@ -22,14 +22,14 @@ class _PhotoBytesCache {
   }
 }
 
-class DriveImage extends StatefulWidget {
+class StoredPhotoImage extends StatefulWidget {
   final String fileId;
   final double? width;
   final double? height;
   final BoxFit fit;
   final PhotoStorageService? photoStorage;
 
-  const DriveImage({
+  const StoredPhotoImage({
     super.key,
     required this.fileId,
     this.width,
@@ -39,12 +39,12 @@ class DriveImage extends StatefulWidget {
   });
 
   @override
-  State<DriveImage> createState() => _DriveImageState();
+  State<StoredPhotoImage> createState() => _StoredPhotoImageState();
 }
 
-class _DriveImageState extends State<DriveImage> {
+class _StoredPhotoImageState extends State<StoredPhotoImage> {
   late final PhotoStorageService _photoStorage =
-      widget.photoStorage ?? GoogleDriveService();
+      widget.photoStorage ?? R2PhotoStorageService();
 
   late Future<Uint8List> _imageFuture;
 
@@ -55,7 +55,7 @@ class _DriveImageState extends State<DriveImage> {
   }
 
   @override
-  void didUpdateWidget(covariant DriveImage oldWidget) {
+  void didUpdateWidget(covariant StoredPhotoImage oldWidget) {
     super.didUpdateWidget(oldWidget);
 
     if (oldWidget.fileId != widget.fileId) {

@@ -3,14 +3,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/book_repository.dart';
+import '../../data/services/book_sharing_service.dart';
 import '../../models/book.dart';
 import '../../utils/date_format.dart';
 import '../../utils/error_messages.dart';
 import '../books/book_form_screen.dart';
 import '../books/book_screen.dart';
-import '../../services/google_drive_service.dart';
+import '../../services/google_auth_service.dart';
 import '../../services/notification_service.dart';
-import '../../widgets/drive_image.dart';
+import '../../widgets/stored_photo_image.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,8 +22,9 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _bookRepository = BookRepository();
-  final _googleDriveService = GoogleDriveService();
+  final _googleAuthService = GoogleAuthService();
   final _authRepository = AuthRepository();
+  final _bookSharingService = BookSharingService();
   late final _booksStream = _bookRepository.watchMyBooks();
   late bool _isGoogleLinked = _checkGoogleLinked();
   bool _isLinkingGoogle = false;
@@ -76,8 +78,62 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _logout() async {
     try {
-      await _googleDriveService.clearSession();
+      await _googleAuthService.clearSession();
       await FirebaseAuth.instance.signOut();
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(e))));
+    }
+  }
+
+  /// Prompts for a share code (spec §11 — see book_screen.dart's
+  /// "Share Album", which shows the code the other parent enters here) and
+  /// joins that book via the `joinBook` Cloud Function. No book is selected
+  /// yet at this point, so this dialog has no per-book language to follow —
+  /// stays English, unlike the rest of the recently-translated book UI.
+  Future<void> _joinBook() async {
+    final controller = TextEditingController();
+
+    final code = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Join a Book'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Share code'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final trimmed = controller.text.trim();
+                if (trimmed.isNotEmpty) Navigator.pop(context, trimmed);
+              },
+              child: const Text('Join'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (code == null || !mounted) return;
+
+    try {
+      final childName = await _bookSharingService.joinBook(code);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Joined $childName's book!")));
     } catch (e) {
       if (!mounted) return;
 
@@ -93,6 +149,11 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('My albums'),
         actions: [
+          IconButton(
+            onPressed: _joinBook,
+            icon: const Icon(Icons.group_add),
+            tooltip: 'Join a Book',
+          ),
           if (!_isGoogleLinked)
             IconButton(
               onPressed: _isLinkingGoogle ? null : _linkGoogleAccount,
@@ -163,7 +224,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     leading: _BookAvatar(book: book),
                     title: Text(book.childName),
-                    subtitle: Text('Born ${formatShortDate(book.birthDate)}'),
+                    subtitle: Text(
+                      'Born ${formatDate(book.birthDate, book.dateDisplay)}',
+                    ),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () {
                       Navigator.push(
@@ -220,7 +283,7 @@ class _BookAvatar extends StatelessWidget {
       child: SizedBox(
         width: 48,
         height: 48,
-        child: DriveImage(
+        child: StoredPhotoImage(
           fileId: coverPhoto.thumbnailFileId ?? coverPhoto.originalFileId,
           fit: BoxFit.cover,
         ),

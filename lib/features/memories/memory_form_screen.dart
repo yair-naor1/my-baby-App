@@ -7,10 +7,12 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../../models/photo_reference.dart';
 import '../../services/ai_text_enhancement_service.dart';
-import '../../services/google_drive_service.dart';
+import '../../services/r2_photo_storage_service.dart';
 import '../../utils/date_format.dart';
 import '../../utils/error_messages.dart';
-import '../../widgets/drive_image.dart';
+import '../../widgets/hebrew_aware_date_picker.dart';
+import '../../widgets/photo_viewer_screen.dart';
+import '../../widgets/stored_photo_image.dart';
 
 enum _ExitChoice { keepEditing, saveAndExit, exitWithoutSaving }
 
@@ -23,12 +25,18 @@ class MemoryFormScreen extends StatefulWidget {
   /// Hebrew grammatical gender comes out right. Never shown in this UI.
   final String? childGender;
 
+  /// The owning book's date-display preference (spec §7.1/§13) —
+  /// 'gregorian', 'hebrew', or 'both'. Only affects how the picked date is
+  /// *shown* here, never the date picker itself.
+  final String dateDisplay;
+
   const MemoryFormScreen({
     super.key,
     required this.bookId,
     this.memory,
     this.memoryService,
     this.childGender,
+    this.dateDisplay = 'gregorian',
   });
 
   bool get isEditing => memory != null;
@@ -47,7 +55,7 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
   late final MemoryService _memoryService =
       widget.memoryService ??
       MemoryService(
-        photoStorage: GoogleDriveService(),
+        photoStorage: R2PhotoStorageService(),
         memoryRepository: MemoryRepository(),
       );
   late String _initialText;
@@ -211,13 +219,95 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
     });
   }
 
-  Future<void> _selectDate() async {
-    final selectedDate = await showDatePicker(
-      context: context,
-      initialDate: _memoryDate ?? DateTime.now(),
-      firstDate: DateTime(1900),
-      lastDate: DateTime.now(),
+  void _openPhotoViewer({
+    required int itemCount,
+    required int initialIndex,
+    required Widget Function(BuildContext context, int index) imageBuilder,
+  }) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PhotoViewerScreen(
+          itemCount: itemCount,
+          initialIndex: initialIndex,
+          imageBuilder: imageBuilder,
+        ),
+      ),
     );
+  }
+
+  /// Opens the full-screen viewer across *every* photo this memory has —
+  /// already-saved ([_existingPhotos]) and just-picked-this-session
+  /// ([_newPhotos]) alike, existing ones first — so swiping never runs into
+  /// an invisible boundary between the two.
+  void _openCombinedPhotoViewer({required int initialIndex}) {
+    _openPhotoViewer(
+      itemCount: _existingPhotos.length + _newPhotos.length,
+      initialIndex: initialIndex,
+      imageBuilder: (context, i) {
+        if (i < _existingPhotos.length) {
+          return StoredPhotoImage(
+            fileId: _existingPhotos[i].originalFileId,
+            fit: BoxFit.contain,
+          );
+        }
+
+        final newPhoto = _newPhotos[i - _existingPhotos.length];
+
+        return Image.file(File(newPhoto.path), fit: BoxFit.contain);
+      },
+    );
+  }
+
+  /// One photo tile shared by both the existing-photo and new-photo halves
+  /// of the combined gallery `Wrap` — same size, same remove-button
+  /// placement, same tap-to-view-full-screen behavior, regardless of which
+  /// underlying list the photo actually lives in.
+  Widget _photoThumbnail({
+    required Key key,
+    required double width,
+    required Widget image,
+    required VoidCallback onTap,
+    required VoidCallback? onRemove,
+  }) {
+    return Stack(
+      key: key,
+      children: [
+        GestureDetector(
+          onTap: onTap,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(width: width, height: 90, child: image),
+          ),
+        ),
+        Positioned.directional(
+          textDirection: Directionality.of(context),
+          end: 2,
+          top: 2,
+          child: IconButton.filled(
+            visualDensity: VisualDensity.compact,
+            onPressed: onRemove,
+            icon: const Icon(Icons.close, size: 18),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _selectDate() async {
+    final selectedDate = widget.dateDisplay == 'gregorian'
+        ? await showDatePicker(
+            context: context,
+            initialDate: _memoryDate ?? DateTime.now(),
+            firstDate: DateTime(1900),
+            lastDate: DateTime.now(),
+          )
+        : await showDatePickerWithHebrew(
+            context: context,
+            initialDate: _memoryDate ?? DateTime.now(),
+            firstDate: DateTime(1900),
+            lastDate: DateTime.now(),
+          );
 
     if (selectedDate != null) {
       setState(() {
@@ -343,88 +433,58 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            if (_existingPhotos.isNotEmpty) ...[
+            // One flowing gallery for both already-saved photos and photos
+            // just picked this session — previously these were two separate
+            // lists/rows with two separate full-screen viewers, which read as
+            // "some photos are somewhere else" the moment a memory had both
+            // (found on-device, 2026-09-07). A single Wrap + a single
+            // combined viewer (_openCombinedPhotoViewer) fixes both the
+            // visual split and the swipe-between-photos gap.
+            if (_existingPhotos.isNotEmpty || _newPhotos.isNotEmpty) ...[
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
-                children: _existingPhotos.map((photo) {
-                  final imageId = photo.thumbnailFileId ?? photo.originalFileId;
-
-                  return Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: SizedBox(
-                          width: _galleryPhotoWidth(photo),
-                          height: 90,
-                          child: DriveImage(
-                            key: ValueKey(imageId),
-                            fileId: imageId,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
+                children: [
+                  for (var index = 0; index < _existingPhotos.length; index++)
+                    _photoThumbnail(
+                      key: ValueKey(
+                        _existingPhotos[index].thumbnailFileId ??
+                            _existingPhotos[index].originalFileId,
                       ),
-                      Positioned.directional(
-                        textDirection: Directionality.of(context),
-                        end: 2,
-                        top: 2,
-                        child: IconButton.filled(
-                          visualDensity: VisualDensity.compact,
-                          onPressed: _isLoading
-                              ? null
-                              : () {
-                                  setState(() {
-                                    _existingPhotos.remove(photo);
-                                  });
-                                },
-                          icon: const Icon(Icons.close, size: 18),
-                        ),
+                      width: _galleryPhotoWidth(_existingPhotos[index]),
+                      image: StoredPhotoImage(
+                        fileId:
+                            _existingPhotos[index].thumbnailFileId ??
+                            _existingPhotos[index].originalFileId,
+                        fit: BoxFit.cover,
                       ),
-                    ],
-                  );
-                }).toList(),
+                      onTap: () =>
+                          _openCombinedPhotoViewer(initialIndex: index),
+                      onRemove: _isLoading
+                          ? null
+                          : () => setState(
+                              () => _existingPhotos.removeAt(index),
+                            ),
+                    ),
+                  for (var index = 0; index < _newPhotos.length; index++)
+                    _photoThumbnail(
+                      key: ValueKey(_newPhotos[index].path),
+                      width: 90,
+                      image: Image.file(
+                        File(_newPhotos[index].path),
+                        fit: BoxFit.cover,
+                      ),
+                      onTap: () => _openCombinedPhotoViewer(
+                        initialIndex: _existingPhotos.length + index,
+                      ),
+                      onRemove: _isLoading
+                          ? null
+                          : () => setState(() => _newPhotos.removeAt(index)),
+                    ),
+                ],
               ),
               const SizedBox(height: 12),
             ],
-            if (_newPhotos.isNotEmpty)
-              SizedBox(
-                height: 110,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _newPhotos.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 8),
-                  itemBuilder: (context, index) {
-                    final photo = _newPhotos[index];
-
-                    return Stack(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.file(
-                            File(photo.path),
-                            width: 100,
-                            height: 100,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                        Positioned.directional(
-                          textDirection: Directionality.of(context),
-                          end: 2,
-                          top: 2,
-                          child: IconButton(
-                            onPressed: () {
-                              setState(() {
-                                _newPhotos.removeAt(index);
-                              });
-                            },
-                            icon: const Icon(Icons.cancel),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
 
             OutlinedButton.icon(
               onPressed: _isLoading ? null : _pickPhotos,
@@ -474,7 +534,7 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
               title: Text(
                 _memoryDate == null
                     ? 'Date: Today'
-                    : 'Date: ${formatShortDate(_memoryDate!)}',
+                    : 'Date: ${formatDate(_memoryDate!, widget.dateDisplay)}',
               ),
               trailing: const Icon(Icons.calendar_today),
               onTap: _selectDate,

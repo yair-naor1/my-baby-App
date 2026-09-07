@@ -12,15 +12,16 @@ enum AlbumDesign {
   softPastelMinimal,
   softPastelFramed;
 
-  /// User-facing name shown in the design picker.
-  String get displayName {
+  /// User-facing name shown in the design picker, translated alongside the
+  /// rest of the album-options UI (spec §13/§14) when [isHebrew].
+  String displayName(bool isHebrew) {
     switch (this) {
       case AlbumDesign.softPastel:
-        return 'Soft Pastel';
+        return isHebrew ? 'פסטל רך' : 'Soft Pastel';
       case AlbumDesign.softPastelMinimal:
-        return 'Soft Pastel — Minimal';
+        return isHebrew ? 'פסטל רך — מינימלי' : 'Soft Pastel — Minimal';
       case AlbumDesign.softPastelFramed:
-        return 'Soft Pastel — Framed';
+        return isHebrew ? 'פסטל רך — ממוסגר' : 'Soft Pastel — Framed';
     }
   }
 

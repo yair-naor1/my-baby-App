@@ -79,11 +79,24 @@ class _AlbumViewerScreenState extends State<AlbumViewerScreen> {
     );
   }
 
+  // Deliberately NOT wrapped in Directionality (unlike the Ideas screens):
+  // the swipeable page content already gets correct RTL from widget.isRtl
+  // at the AlbumPageWidget level, scoped per-page. Wrapping this whole
+  // screen would also flip the PageView's swipe direction and the
+  // prev/next chevrons' semantics — a real UX change nobody asked for and
+  // nothing here has tested. Text below is translated on its own; Hebrew
+  // glyphs shape correctly regardless of ambient Directionality.
   @override
   Widget build(BuildContext context) {
+    final isRtl = widget.isRtl;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text("${widget.book.childName}'s Album"),
+        title: Text(
+          isRtl
+              ? 'האלבום של ${widget.book.childName}'
+              : "${widget.book.childName}'s Album",
+        ),
         actions: [
           if (_isExporting)
             const Padding(
@@ -102,12 +115,18 @@ class _AlbumViewerScreenState extends State<AlbumViewerScreen> {
                 if (value == 'export') {
                   _exportPdf();
                 } else if (value == 'share') {
-                  _showComingSoon('Sharing');
+                  _showComingSoon(isRtl ? 'שיתוף' : 'Sharing');
                 }
               },
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: 'export', child: Text('Export PDF')),
-                PopupMenuItem(value: 'share', child: Text('Share')),
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'export',
+                  child: Text(isRtl ? 'ייצוא PDF' : 'Export PDF'),
+                ),
+                PopupMenuItem(
+                  value: 'share',
+                  child: Text(isRtl ? 'שיתוף' : 'Share'),
+                ),
               ],
             ),
         ],

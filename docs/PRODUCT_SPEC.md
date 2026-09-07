@@ -132,6 +132,14 @@ only purpose is getting Hebrew grammatical gender agreement right in AI text
 enhancement (§15); the form copy says so explicitly rather than asking for
 gender as if it were its own meaningful question.
 
+**Language preference (implemented 2026-09-07).** A required English/Hebrew
+choice, shown prominently (not tucked in the optional section below the
+divider, since it always has a value and drives real behavior). Sets
+`Book.language`, which already existed as a model field before this — Ideas
+(§7.2) and album generation (§14) already read it, `createBook` just always
+wrote `'en'` until now. Editable later via Edit Book Info, same form. See §13
+for the scope decision (Ideas + album only, not a full-app translation).
+
 ### 7.2 Book screen (the timeline)
 
 This is the main day-to-day screen. The child/book appears at the top, the memory
@@ -341,20 +349,23 @@ Do not merge these:
 Being signed into Baby Book does not mean photo storage is connected. Disconnecting
 photo storage must not delete the Baby Book account.
 
-Google sign-in is a deliberate exception, not a violation of this: it bundles Baby
-Book identity and Drive photo-storage authorization into one consent step for UX
-simplicity (`AuthRepository.signInWithGoogle`), while still keeping them as separate
-concerns underneath — the Drive account is remembered against the signed-in `uid` in
-Firestore (`GoogleDriveService.rememberSignedInAccountFor`), not fused into the auth
-credential itself. An email/password account can separately link Google later (Home
-screen "Link Google Account") to gain photo storage without changing identity.
+Google sign-in (`AuthRepository.signInWithGoogle`, backed by `GoogleAuthService`) is
+now a plain identity provider — before the R2 migration (§9.3) it also requested
+Drive's `drive.file` scope and bundled Drive photo-storage authorization into the same
+consent step; that's gone now that photo storage doesn't go through the signed-in
+user's own Google account at all. An email/password account can separately link
+Google later (Home screen "Link Google Account") purely to gain that sign-in method,
+with no photo-storage side effect either way.
 
 ### 9.3 Photo storage — Cloudflare R2
 
-**Decided (2026-08-30).** Photo bytes will be stored in a Cloudflare R2 bucket
-owned by the Baby Book operator, replacing Google Drive. `GoogleDriveService`
-remains in place and in use for the current milestone (§21) — this is the target
-architecture for a future migration, **not yet implemented**.
+**Decided (2026-08-30), implemented (2026-09-07).** Photo bytes are stored in a
+Cloudflare R2 bucket owned by the Baby Book operator, replacing Google Drive.
+`R2PhotoStorageService` is the live `PhotoStorageService`; the class that used to be
+`GoogleDriveService` is now `GoogleAuthService` — a plain Google identity provider
+with no photo-storage role at all (see §9.2). No migration script was needed: only
+dev/test data existed at cutover time, so old `provider: 'googleDrive'` references
+were simply left to go stale rather than migrated.
 
 **Why not Google Drive (closed).** The PRD originally specified Firebase Cloud
 Storage; that was replaced with Google Drive on the premise that photos could live
@@ -410,35 +421,43 @@ its actual numbers and lost on cost at scale, not on assumption.
 model was specifically chosen to avoid. §10.2's monetization item is now
 load-bearing, not a someday-item.
 
-**Target architecture (design only — build during the actual migration):**
+**Target architecture — implemented as designed:**
 
-- **The client never holds R2 credentials.** A small signing backend (a Cloud
-  Function, alongside the existing Firebase project) is the only thing with R2
-  write/delete access. It authenticates the caller via their Firebase ID token and
-  checks Firestore book membership before issuing anything. This is R2's
-  equivalent of "Firestore and storage security rules enforce authorization
-  server-side on every read and write" (§12) — R2 has no native per-object rules
-  engine, so the signing backend *is* the security boundary.
-- **Upload:** client asks the backend for a short-lived presigned PUT URL for a
-  known object key, uploads the original and the client-generated thumbnail
-  directly to R2, then writes the `PhotoReference` to Firestore. The existing
-  upload-then-write-then-rollback-on-failure order in `MemoryService.saveMemory`
-  carries over unchanged — only what `PhotoStorageService` talks to changes.
-- **Download:** client asks the backend for a short-lived presigned GET URL per
-  photo. **No permanent public URLs** (§12, hard rule) — R2 supports a public
-  bucket/custom domain, but that option is off the table for this reason alone.
-- **Delete:** routed through the backend, never done client-side, for the same
+- **The client never holds R2 credentials.** `functions/r2Storage.js` (three
+  `onCall` functions: `getPhotoUploadUrls`, `getPhotoDownloadUrl`, `deletePhotos`)
+  is the only thing with R2 access, via `@aws-sdk/client-s3` +
+  `@aws-sdk/s3-request-presigner` against the R2 S3-compatible endpoint, with
+  credentials held as Firebase Functions secrets (`R2_ACCOUNT_ID`,
+  `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`), never in the
+  repo. Each call authenticates via the caller's Firebase ID token and checks
+  Firestore book membership (mirroring `firestore.rules`' `isBookMember`) before
+  issuing anything. This is R2's equivalent of "Firestore and storage security
+  rules enforce authorization server-side on every read and write" (§12) — R2 has
+  no native per-object rules engine, so this signing backend *is* the security
+  boundary.
+- **Upload:** `R2PhotoStorageService.uploadPhoto` asks the backend for presigned
+  PUT URLs (~5 min TTL) for a server-generated object key (the function owns key
+  generation — `crypto.randomUUID()` — never a client-supplied path), uploads the
+  original and the client-generated thumbnail directly to R2, then the existing
+  `MemoryService.saveMemory`/`BookService.saveBookInfo`
+  upload-then-write-then-rollback-on-failure order writes the `PhotoReference` to
+  Firestore, unchanged.
+- **Download:** `R2PhotoStorageService.downloadPhoto` asks the backend for a
+  presigned GET URL (~10 min TTL) per photo. **No permanent public URLs** (§12,
+  hard rule) — R2 supports a public bucket/custom domain, but that option was
+  never used.
+- **Delete:** routed through `deletePhotos`, never done client-side, for the same
   reason upload and download are signed rather than direct.
-- **Object keys** mirror the current Drive folder convention —
+- **Object keys** mirror the old Drive folder convention —
   `books/{bookId}/{photoId}-original.{ext}` and
   `books/{bookId}/{photoId}-thumb.jpg` — so authorization checks and cleanup stay
-  keyed on `bookId`, the same way `GoogleDriveService` keys on it today via Drive
-  `appProperties`.
+  keyed on `bookId`; the backend derives `bookId` straight from the key it's
+  asked to act on, so a key always self-authorizes against its own book.
 - **This is also what finally satisfies §11 properly:** access is gated on
   Firestore book membership, not on whose personal cloud account a photo happens
   to live in — the exact problem that made Drive unworkable for a shared book.
-- Keep "bring your own storage" as an optional later mode; not required for the
-  migration itself.
+- "Bring your own storage" as an optional later mode is still just an idea, not
+  built — not required by this migration.
 
 ---
 
@@ -449,11 +468,10 @@ the decision here.
 
 ### 10.1 Photo storage — resolved, see §9.3
 
-Closed 2026-08-30: Cloudflare R2, replacing Google Drive. Decision, evidence, cost
-math, and target architecture are recorded in §9.3, not here — this entry is kept
-only so existing cross-references to "§10.1" still land somewhere meaningful.
-Migration itself is not yet implemented; `GoogleDriveService` remains in use for
-the current milestone (§21).
+Closed 2026-08-30: Cloudflare R2, replacing Google Drive. Implemented 2026-09-07.
+Decision, evidence, cost math, and architecture are recorded in §9.3, not here —
+this entry is kept only so existing cross-references to "§10.1" still land
+somewhere meaningful.
 
 ### 10.2 Other open items
 
@@ -527,6 +545,13 @@ access gated on Firestore book membership via a signing backend, not on whose
 personal cloud account a photo happens to live in — this is precisely why Google
 Drive could not satisfy this requirement.
 
+**Implemented (2026-09-07) — see §20 for the full account.** Joining works via a
+share code (the book's own `bookId`): "Share Album" in the book's ⋮ menu shows/copies
+it, "Join a Book" on the Home screen redeems it, backed by the `joinBook` Cloud
+Function (`functions/bookSharing.js`) since Firestore rules alone can't let a
+brand-new joiner add themselves. No expiry, rotation, member list, or revocation yet
+— open for a future pass, not silently solved.
+
 Additional family roles, such as read-only access for grandparents, come later.
 
 ---
@@ -555,7 +580,15 @@ requirement, not an add-on.
 Hebrew is not a later translation exercise. Build layouts RTL-capable from the start.
 
 - UI language: Hebrew or English.
-- Book language may eventually be set per book, separately from UI language.
+- **Book language, decided and implemented 2026-09-07 (§7.1):** set per book at
+  creation/edit, separately from device/system UI language. Deliberately scoped
+  narrow — drives the Ideas bank (§7.2, both prompt text and category headings)
+  and the generated album's text direction (§14). **Not** a general app-UI
+  translation system: no `intl`/Flutter-l10n setup exists in this project, and
+  building one (translating every screen's button/label copy, RTL-testing each
+  one) is a separate, materially larger future project, not bundled into this.
+  The rest of the app — Home, Book screen, Add/Edit Memory, book forms — stays
+  English-only UI chrome regardless of a book's language setting.
 - A Hebrew book needs RTL page direction, text, numbering, and layout.
 - Mixed content — Hebrew text with numbers or English — must stay readable and must
   not break layout.
@@ -601,13 +634,13 @@ rewrite the story — it finds a good way to present content the parent already 
   (not calendar month), with a divider page before each new month — carries a
   representative photo from that month when one exists. Matches the monthly-reminder
   convention already used in §7.6.
-- **RTL is detected from content, not `Book.language`.** `BookRepository.createBook`
-  hardcodes `language: 'en'` always — nothing in the app currently sets a book to
-  Hebrew — so trusting that field silently broke RTL for every real Hebrew book
-  (found via on-device testing, not by inspection). `AlbumLayoutBuilder.detectIsRtl`
-  instead checks the child's name and memory text for Hebrew script and treats the
-  whole album as RTL if any is found — a real per-book language field/setting is
-  still open (see Album Settings below).
+- **RTL is driven by `Book.language` (implemented 2026-09-07, §7.1/§13), with
+  content-detection as a safety net.** `AlbumLayoutBuilder.detectIsRtl` checks
+  `book.language == 'he'` first; only falls back to scanning the child's name
+  and memory text for Hebrew script if that's unset/wrong — covers older books
+  saved before the language field was settable, or one set inaccurately. Before
+  this, `language` was hardcoded to `'en'` always, so the content-scan was the
+  *only* signal — that's no longer the normal case, just the fallback.
 - **Three designs, one palette.** `AlbumDesign`: Soft Pastel (plain), Soft Pastel —
   Minimal (small corner icon accents), Soft Pastel — Framed (scalloped border, accent
   photo frame, name badge). All three share one `AlbumDesignTheme` and differ only in
@@ -782,8 +815,8 @@ Already built:
 
 - Flutter app created
 - Firebase project connected
-- Firebase Auth work, including Google sign-in with silent account persistence
-  (§9.2) and Drive access granted in the same consent step
+- Firebase Auth work, including Google sign-in (§9.2) — plain identity only as of
+  the R2 migration, no Drive scope requested anymore
 - Firestore-based Book repository
 - Home screen listing books, showing each book's cover photo (§7.1/§7.2)
 - Book creation/edit flow, including the optional birth-info questions and
@@ -792,8 +825,11 @@ Already built:
 - Memory model and Memory repository
 - Add/Edit Memory form work, tap-to-edit + a delete icon on the card (§7.4)
 - Image picker integration
-- Google Drive service and Drive photo upload
-- Drive photo references connected to memories
+- Cloudflare R2 photo storage (§9.3): `functions/r2Storage.js` signing backend
+  (presigned upload/download URLs, server-side key generation, Firestore
+  membership checks) and `R2PhotoStorageService` on the client. Replaces the old
+  Google Drive photo storage — `googleapis`/
+  `extension_google_sign_in_as_googleapis_auth` dropped from `pubspec.yaml`.
 - `firebase_storage` dependency removed
 - AI Editor (§15) — `functions/enhanceMemoryText`, Gemini 3.1 Flash-Lite via
   Vertex AI (§10.2). Confirmed working end-to-end on-device across two rounds
@@ -811,11 +847,59 @@ Already built:
   (`printing` package). Non-editable; see §14 for what's still deferred.
 - Notifications client + backend written (§7.6) — Cloud Function not yet deployed,
   not yet confirmed end-to-end on a real device.
-- Google sign-in "account picker every launch" bug — root-caused and fixed in
-  `GoogleDriveService._connectSlow` (a destructive `signOut()`/`clearCredentialState()`
-  call in the silent-restore fallback was wiping the exact state needed for the next
-  silent restore). Not yet confirmed on-device; further sign-in UX work paused at the
-  user's request pending confirmation this is even the direction wanted.
+- Google sign-in "account picker every launch" bug — the earlier fix lived in the
+  Drive-scoped silent-restore machinery (`GoogleDriveService._connectSlow`) that the
+  R2 migration removed entirely (see below): once nothing needs a Drive-scoped
+  token kept alive across launches, there's no restore logic left to have this bug
+  in — Firebase Auth's own session persistence is what keeps the user logged in
+  now.
+- **Google sign-in simplified alongside the R2 migration (2026-09-07), confirmed
+  on-device the same day.** `GoogleDriveService` — which conflated two unrelated
+  jobs, Google identity and Drive photo storage — is now two things:
+  `R2PhotoStorageService` (photo storage) and `GoogleAuthService` (identity only,
+  renamed from `GoogleDriveService`). `GoogleAuthService` no longer requests the
+  `drive.file` OAuth scope at all, and the ~150 lines of silent-restore machinery
+  that existed solely to keep a Drive-scoped token alive across app launches
+  (`connect`, `_connectSlow`, `_tryLightweightRestore`, the cached Drive API
+  client, the `users/{uid}.driveAccountEmail` Firestore field) are gone — Firebase
+  Auth's own persisted session already covers "stay logged in" without any of
+  that. Confirmed twice on-device: the Google consent screen now only asks to
+  share name/email/profile photo, no Drive permission line at all.
+  `signInInteractively` also now calls `disconnect()` instead of `signOut()`
+  before `authenticate()` — `signOut()` only clears this plugin's local session
+  pointer, not the underlying Android authorization, and could still hand back a
+  stale/already-consumed ID token; `disconnect()` actually revokes the prior
+  grant, forcing a genuinely fresh token every time. Safe now that nothing needs
+  Credential Manager state preserved across launches.
+- **`PROVIDER_ALREADY_LINKED` reproduced and root-caused on-device (2026-09-07) —
+  turned out to be stale test data, not a code bug.** The dev Firebase project's
+  `ynaor12@gmail.com` test account had a *different* Google identity
+  (`miriamfrankl97@gmail.com`) linked as its `google.com` provider, left over from
+  earlier co-parent-linking testing. Signing in with the account's own real Google
+  identity correctly failed — Firebase only allows one Google account linked per
+  Baby Book account, and this one's slot was already occupied by the wrong
+  identity. Confirmed via `firebase auth:export`. Resolved by deleting that one
+  test user (Firebase Console; the newer console has no per-provider unlink
+  action, and this project isn't upgraded to Identity Platform, which would have
+  had one) and signing up again fresh — the new account linked its own Google
+  identity cleanly with zero errors. Not a lesson about the app's code; a lesson
+  about not leaving mismatched test accounts lying around in a shared dev
+  project.
+- **Book language preference (§7.1/§13) and full-screen photo viewer
+  (2026-09-07).** `BookFormScreen` now has a required English/עברית `ChoiceChip`
+  pair, wired through `BookService.saveBookInfo` → `BookRepository.createBook`/
+  `updateBookInfo` → `Book.language` (previously hardcoded to `'en'` at creation,
+  never editable). `IdeasScreen` and `_CategoryIdeasScreen` now wrap their content
+  in `Directionality` based on it and translate category headings via the new
+  `ideaCategoryTranslations` map in `idea_prompts.dart` (prompt text itself was
+  already bilingual) — the rest of the app's UI chrome is untouched, per the
+  explicit scope decision in §13. Separately, `PhotoViewerScreen`
+  (`lib/widgets/photo_viewer_screen.dart`) adds a full-screen, swipeable,
+  pinch-zoomable photo viewer opened by tapping any photo in Add/Edit Memory's
+  existing-photos or new-photos rows — the first place in the app that displays
+  full-resolution originals rather than the 320px thumbnail used everywhere else
+  (confirmed during this work: `pickMultiImage()` uploads originals uncompressed,
+  they just weren't shown anywhere until now).
 
 Files seen during development (verify against Git for exact current names):
 
@@ -835,7 +919,8 @@ lib/models/book.dart
 lib/models/album_page.dart
 lib/models/album_design.dart
 lib/models/album_design_theme.dart
-lib/services/google_drive_service.dart
+lib/services/google_auth_service.dart
+lib/services/r2_photo_storage_service.dart
 lib/services/ai_text_enhancement_service.dart
 lib/services/album_layout_builder.dart
 lib/services/album_pdf_renderer.dart
@@ -843,9 +928,14 @@ lib/services/notification_service.dart
 lib/data/idea_prompts.dart
 lib/models/idea_prompt.dart
 lib/features/books/ideas_screen.dart
+lib/widgets/photo_viewer_screen.dart
+lib/widgets/hebrew_aware_date_picker.dart
+lib/data/services/book_sharing_service.dart
 lib/navigation.dart
 functions/index.js
 functions/notifications.js
+functions/r2Storage.js
+functions/bookSharing.js
 ```
 
 ### Known unfinished work
@@ -853,25 +943,49 @@ functions/notifications.js
 - **Latest AI Editor panel redesign and Ideas screen tap-animation change are
   built, installed, not yet confirmed on-device.** No Cloud Function redeploy
   needed for this round (only client-side changes).
-- **Sharing between parents (§11) has no invite/add-member UI at all.**
-  `ownerIds` is created as a single-element array at book creation with no
-  code path to add a second person. The Firestore rules already correctly
-  support multi-owner books (array-membership check, not "must equal
-  creator") — only the actual invite UI is missing. Untested with a real
-  second device.
-- **Google sign-in `PROVIDER_ALREADY_LINKED` — fix applied, not yet confirmed.**
-  An account already linked to Google via an earlier session (either this one's
-  own testing, or a real prior link) would fail on a fresh `signInWithCredential`
-  even after clearing local app data. Root cause: `signInInteractively()` called
-  `_googleSignIn.authenticate()` without first calling `.signOut()` — the newer
-  Credential-Manager-backed `authenticate()` can silently hand back a cached
-  session/token instead of a fresh OAuth exchange, and a reused token already
-  consumed by an earlier `linkWithCredential` call gets rejected by Firebase's
-  backend as already used. Fixed by adding `_googleSignIn.signOut()` before
-  `authenticate()` (the same pattern `changeAccount()` already used) — deployed,
-  awaiting on-device confirmation.
+- **Sharing between parents (§11) — built 2026-09-07, deployed, not yet
+  confirmed with a real second device/account.** `ownerIds` used to be a
+  single-element array set once at creation with no way to add a second
+  person — Firestore rules already correctly supported multi-owner books
+  (array-membership check, not "must equal creator"), but nothing let a
+  *second* uid ever get in: a brand-new joiner can't add themselves via a
+  plain client write, since `allow update` requires already being an owner.
+  Closed with a Cloud Function (`functions/bookSharing.js`, `joinBook`) —
+  same shape as the R2 signing backend: it's the security boundary a plain
+  Firestore rule can't express, checking auth itself and writing via the
+  Admin SDK. **The invite code is the book's own `bookId`** — an unguessable
+  Firestore auto-id doubling as a non-expiring share code, no separate code
+  generation. Owner side: "Share Album" in the book's ⋮ menu
+  (`book_screen.dart`, `_shareAlbum`) shows the code with a copy-to-clipboard
+  button — no native share sheet, since that would need a new dependency
+  (`share_plus`) for something copy-paste already solves. Joiner side: "Join
+  a Book" on the Home screen AppBar (`home_screen.dart`, `_joinBook`) prompts
+  for a code and calls `joinBook`; the shared book then appears in their list
+  automatically since `watchMyBooks()` is already a live stream. Once
+  `ownerIds` includes both uids, everything else — memory/photo reads and
+  writes, the R2 signing backend's own membership check — already worked
+  with zero further changes, since all of it was already keyed on
+  `ownerIds` dynamically.
+  **Known gap, deliberately not solved here:** the code never expires or
+  rotates, and there's no member list or revocation — anyone who ever sees
+  the code can join, permanently. Fine for a two-phone trial; a real "manage
+  members" design is still open before wider release.
+  **Also found and fixed along the way:** `friendlyErrorMessage`
+  (`lib/utils/error_messages.dart`) had no case for `FirebaseFunctionsException`
+  at all — every hand-written, user-safe `HttpsError` message across every
+  Cloud Function in this app (`joinBook`, `r2Storage.js`,
+  `enhanceMemoryText`) was silently getting replaced by the generic fallback
+  instead of ever reaching the user. Fixed by surfacing
+  `FirebaseFunctionsException.message` directly — safe unconditionally here
+  (unlike Firebase Auth's own default messages, which needed an allowlist)
+  since every message thrown from this app's own functions was already
+  written to be shown as-is.
 - **Push notifications (§7.6) built, not deployed or confirmed.** See §7.6 for what's
   actually done vs. missing.
+- **Book language preference and full-screen photo viewer (2026-09-07) — built,
+  `flutter analyze` clean, not yet confirmed on-device.** No Cloud Function
+  changes needed (both are client-only). See the §20 entry above for what
+  changed and why.
 - **Album generation (§14) follow-ups**, roughly in the order they'd matter: deploy
   is n/a (client-only) but photo resolution is thumbnail-only (print-quality export
   needs real resolution), decoration is cover-page-only, grid photos still
@@ -952,7 +1066,7 @@ Storage authorization screens may obviously name the provider when required.
 
 | Topic | Decision |
 |---|---|
-| Sign-in method | Email/Password and Google (linkable either direction); Google grants Drive access in the same consent step. Apple not yet planned. |
+| Sign-in method | Email/Password and Google (linkable either direction), identity only — no photo-storage side effect. Apple not yet planned. |
 | Capture method | Free-form. Never a mandatory questionnaire. |
 | Memory contents | Text and/or photos, plus a date. |
 | Ordering | Chronological by memory date, editable. |
@@ -962,9 +1076,12 @@ Storage authorization screens may obviously name the provider when required.
 | After age one | The same book continues. |
 | Hebrew | Core feature, including RTL in the book itself. |
 | Data storage | Cloud-first with local cache. |
-| Photo storage | Cloudflare R2 — see §9.3. Not yet implemented. |
+| Photo storage | Cloudflare R2 — see §9.3. Implemented 2026-09-07. |
 | Album rendering | Client-side, `pdf` package, no server cost — see §14. |
 | Album v1 scope | Non-editable; Generate/Preview merged into one entry — see §14. |
+| Book language scope | Per-book English/Hebrew preference drives Ideas + album direction only, not app-wide UI translation — see §13. Implemented 2026-09-07. |
+| Photo viewer | Full-screen, swipeable, pinch-zoom, full resolution — opened by tapping a photo in Add/Edit Memory. Implemented 2026-09-07. |
+| Book sharing | Invite-by-code (the book's own id), backed by the `joinBook` Cloud Function — see §11. Implemented 2026-09-07; no expiry/revocation/member-list yet. |
 
 ---
 

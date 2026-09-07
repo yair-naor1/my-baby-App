@@ -10,6 +10,14 @@ class Book {
   final DateTime birthDate;
   final List<String> ownerIds;
   final String language;
+
+  // 'gregorian' (default), 'hebrew', or 'both' — how dates are displayed for
+  // this book (memory dates, birth date). Independent of [language]: a
+  // Hebrew-language book doesn't have to want Hebrew-calendar dates, and
+  // vice versa. Never affects the date *picker* itself, only the read-only
+  // text shown once a date is picked.
+  final String dateDisplay;
+
   final DateTime createdAt;
   final int schemaVersion;
 
@@ -38,6 +46,7 @@ class Book {
     required this.birthDate,
     required this.ownerIds,
     required this.language,
+    required this.dateDisplay,
     required this.createdAt,
     required this.schemaVersion,
     this.birthPlace,

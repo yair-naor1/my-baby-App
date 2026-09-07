@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../models/app_user.dart';
-import '../../services/google_drive_service.dart';
+import '../../services/google_auth_service.dart';
 
 /// Thrown by [AuthRepository.signInWithGoogle] when the Google account's
 /// email already belongs to an existing email/password Baby Book account.
@@ -62,16 +62,14 @@ class AuthRepository {
     return _auth.signInWithEmailAndPassword(email: email, password: password);
   }
 
-  /// Signs into (or creates) the Baby Book account using a Google account,
-  /// and grants Drive photo-storage access in the same consent step — one
-  /// tap, no separate "connect storage" prompt later.
+  /// Signs into (or creates) the Baby Book account using a Google account.
   ///
   /// If already logged in (e.g. via email/password), this links the Google
   /// credential to the current account instead of creating a second one, so
   /// existing books aren't orphaned under a new identity.
   Future<AppUser> signInWithGoogle() async {
-    final driveService = GoogleDriveService();
-    final account = await driveService.signInInteractively();
+    final googleAuthService = GoogleAuthService();
+    final account = await googleAuthService.signInInteractively();
 
     final idToken = account.authentication.idToken;
 
@@ -104,7 +102,7 @@ class AuthRepository {
       rethrow;
     }
 
-    return _finishGoogleSignIn(userCredential, account, driveService);
+    return _finishGoogleSignIn(userCredential, account);
   }
 
   /// Completes a Google sign-in that hit a [GoogleAccountConflict]: signs
@@ -125,25 +123,18 @@ class AuthRepository {
       conflict.pendingCredential,
     );
 
-    return _finishGoogleSignIn(
-      linkedCredential,
-      conflict.googleAccount,
-      GoogleDriveService(),
-    );
+    return _finishGoogleSignIn(linkedCredential, conflict.googleAccount);
   }
 
   Future<AppUser> _finishGoogleSignIn(
     UserCredential userCredential,
     GoogleSignInAccount account,
-    GoogleDriveService driveService,
   ) async {
     final firebaseUser = userCredential.user;
 
     if (firebaseUser == null) {
       throw Exception('Failed to sign in with Google');
     }
-
-    await driveService.rememberSignedInAccountFor(firebaseUser.uid);
 
     final userDoc = await _firestore
         .collection('users')

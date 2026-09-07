@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../../data/repositories/book_repository.dart';
 import '../../data/repositories/memory_repository.dart';
@@ -7,10 +8,10 @@ import '../../data/services/memory_service.dart';
 import '../../models/book.dart';
 import '../../models/memory.dart';
 import '../../models/photo_reference.dart';
-import '../../services/google_drive_service.dart';
+import '../../services/r2_photo_storage_service.dart';
 import '../../utils/date_format.dart';
 import '../../utils/error_messages.dart';
-import '../../widgets/drive_image.dart';
+import '../../widgets/stored_photo_image.dart';
 import '../albums/album_generate_sheet.dart';
 import '../memories/memory_form_screen.dart';
 import 'book_form_screen.dart';
@@ -33,7 +34,7 @@ class _BookScreenState extends State<BookScreen> {
 
   final _bookRepository = BookRepository();
   final _memoryRepository = MemoryRepository();
-  final _photoStorage = GoogleDriveService();
+  final _photoStorage = R2PhotoStorageService();
   late final MemoryService _memoryService = MemoryService(
     photoStorage: _photoStorage,
     memoryRepository: _memoryRepository,
@@ -148,6 +149,7 @@ class _BookScreenState extends State<BookScreen> {
           memory: memory,
           memoryService: _memoryService,
           childGender: book.childGender,
+          dateDisplay: book.dateDisplay,
         ),
       ),
     );
@@ -173,12 +175,16 @@ class _BookScreenState extends State<BookScreen> {
     final newName = await showDialog<String>(
       context: context,
       builder: (context) {
+        final isHebrew = book.language == 'he';
+
         return AlertDialog(
-          title: const Text('Rename Book'),
+          title: Text(isHebrew ? 'שינוי שם הספר' : 'Rename Book'),
           content: TextFormField(
             initialValue: book.childName,
             autofocus: true,
-            decoration: const InputDecoration(labelText: "Child's name"),
+            decoration: InputDecoration(
+              labelText: isHebrew ? "שם הילד/ה" : "Child's name",
+            ),
             onChanged: (value) {
               editedName = value;
             },
@@ -186,7 +192,7 @@ class _BookScreenState extends State<BookScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
+              child: Text(isHebrew ? 'ביטול' : 'Cancel'),
             ),
             FilledButton(
               onPressed: () {
@@ -196,7 +202,7 @@ class _BookScreenState extends State<BookScreen> {
                   Navigator.pop(context, name);
                 }
               },
-              child: const Text('Save'),
+              child: Text(isHebrew ? 'שמירה' : 'Save'),
             ),
           ],
         );
@@ -223,20 +229,25 @@ class _BookScreenState extends State<BookScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
+        final isHebrew = book.language == 'he';
+
         return AlertDialog(
-          title: const Text('Delete book?'),
+          title: Text(isHebrew ? 'למחוק את הספר?' : 'Delete book?'),
           content: Text(
-            'Delete ${book.childName} and all memories in this book?\n\n'
-            'This cannot be undone.',
+            isHebrew
+                ? 'למחוק את ${book.childName} ואת כל הזיכרונות בספר הזה?\n\n'
+                      'לא ניתן לבטל פעולה זו.'
+                : 'Delete ${book.childName} and all memories in this book?\n\n'
+                      'This cannot be undone.',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
+              child: Text(isHebrew ? 'ביטול' : 'Cancel'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Delete'),
+              child: Text(isHebrew ? 'מחיקה' : 'Delete'),
             ),
           ],
         );
@@ -294,10 +305,72 @@ class _BookScreenState extends State<BookScreen> {
     );
   }
 
-  void _showComingSoon(String feature) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('$feature is coming soon.')));
+  void _showComingSoon(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Shows this book's share code (spec §11) — its own `bookId`, an
+  /// unguessable Firestore auto-id doubling as a non-expiring invite code.
+  /// The other parent enters it via Home screen's "Join a Book" action
+  /// (`joinBook` Cloud Function, functions/bookSharing.js) to be added to
+  /// `ownerIds`. No native share sheet (would need a new dependency) — copy
+  /// to clipboard and send it however's convenient.
+  Future<void> _shareAlbum(Book book) async {
+    final isHebrew = book.language == 'he';
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(isHebrew ? 'שיתוף האלבום' : 'Share Album'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                isHebrew
+                    ? 'שתפו קוד זה עם ההורה השני. הוא/היא יזינו אותו במסך '
+                          'הבית תחת "הצטרפות לספר" כדי לקבל גישה לספר הזה.'
+                    : 'Share this code with the other parent. They can enter '
+                          'it under "Join a Book" on the Home screen to get '
+                          'access to this book.',
+              ),
+              const SizedBox(height: 16),
+              SelectableText(
+                book.bookId,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(isHebrew ? 'סגירה' : 'Close'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: book.bookId));
+
+                if (!context.mounted) return;
+
+                Navigator.pop(context);
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      isHebrew ? 'הקוד הועתק' : 'Code copied',
+                    ),
+                  ),
+                );
+              },
+              child: Text(isHebrew ? 'העתקת קוד' : 'Copy Code'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -320,11 +393,19 @@ class _BookScreenState extends State<BookScreen> {
                     case 'album':
                       _openAlbum(book);
                     case 'album_settings':
-                      _showComingSoon('Album Settings');
+                      _showComingSoon(
+                        book.language == 'he'
+                            ? 'הגדרות אלבום יגיעו בקרוב.'
+                            : 'Album Settings is coming soon.',
+                      );
                     case 'print_guide':
-                      _showComingSoon('The printing guide');
+                      _showComingSoon(
+                        book.language == 'he'
+                            ? 'מדריך ההדפסה יגיע בקרוב.'
+                            : 'The printing guide is coming soon.',
+                      );
                     case 'share_album':
-                      _showComingSoon('Sharing');
+                      _shareAlbum(book);
                     case 'edit_info':
                       _editBookInfo(book);
                     case 'rename':
@@ -333,28 +414,48 @@ class _BookScreenState extends State<BookScreen> {
                       _deleteBook(book);
                   }
                 },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(value: 'ideas', child: Text('Ideas')),
-                  PopupMenuItem(value: 'album', child: Text('Album')),
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'ideas',
+                    child: Text(book.language == 'he' ? 'רעיונות' : 'Ideas'),
+                  ),
+                  PopupMenuItem(
+                    value: 'album',
+                    child: Text(book.language == 'he' ? 'אלבום' : 'Album'),
+                  ),
                   PopupMenuItem(
                     value: 'album_settings',
-                    child: Text('Album Settings'),
+                    child: Text(
+                      book.language == 'he' ? 'הגדרות אלבום' : 'Album Settings',
+                    ),
                   ),
                   PopupMenuItem(
                     value: 'print_guide',
-                    child: Text('Printing Guide'),
+                    child: Text(
+                      book.language == 'he' ? 'מדריך הדפסה' : 'Printing Guide',
+                    ),
                   ),
                   PopupMenuItem(
                     value: 'share_album',
-                    child: Text('Share Album'),
+                    child: Text(
+                      book.language == 'he' ? 'שיתוף אלבום' : 'Share Album',
+                    ),
                   ),
-                  PopupMenuDivider(),
+                  const PopupMenuDivider(),
                   PopupMenuItem(
                     value: 'edit_info',
-                    child: Text('Edit Book Info'),
+                    child: Text(
+                      book.language == 'he' ? 'עריכת פרטי הספר' : 'Edit Book Info',
+                    ),
                   ),
-                  PopupMenuItem(value: 'rename', child: Text('Rename Book')),
-                  PopupMenuItem(value: 'delete', child: Text('Delete Book')),
+                  PopupMenuItem(
+                    value: 'rename',
+                    child: Text(book.language == 'he' ? 'שינוי שם' : 'Rename Book'),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text(book.language == 'he' ? 'מחיקת ספר' : 'Delete Book'),
+                  ),
                 ],
               ),
             ],
@@ -452,6 +553,7 @@ class _BookScreenState extends State<BookScreen> {
                 child: _MemoryCard(
                   key: ValueKey(memory.memoryId),
                   memory: memory,
+                  dateDisplay: book.dateDisplay,
                   onTap: () => _openMemory(memory, book),
                   onDelete: () => _deleteMemory(memory),
                 ),
@@ -480,7 +582,7 @@ class _BookCoverHeader extends StatelessWidget {
     return SizedBox(
       width: double.infinity,
       height: 160,
-      child: DriveImage(
+      child: StoredPhotoImage(
         fileId: coverPhoto.thumbnailFileId ?? coverPhoto.originalFileId,
         fit: BoxFit.cover,
       ),
@@ -497,6 +599,7 @@ class _MemoryCard extends StatelessWidget {
   const _MemoryCard({
     super.key,
     required this.memory,
+    required this.dateDisplay,
     required this.onTap,
     required this.onDelete,
   });
@@ -505,6 +608,7 @@ class _MemoryCard extends StatelessWidget {
   static const double _thumbnailSize = 72;
 
   final Memory memory;
+  final String dateDisplay;
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
@@ -532,7 +636,7 @@ class _MemoryCard extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        formatShortDate(memory.memoryDate),
+                        formatDate(memory.memoryDate, dateDisplay),
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           color: Theme.of(context).colorScheme.primary,
                           fontWeight: FontWeight.w600,
@@ -605,7 +709,7 @@ class _MemoryThumbnail extends StatelessWidget {
             child: SizedBox(
               width: size,
               height: size,
-              child: DriveImage(
+              child: StoredPhotoImage(
                 key: ValueKey(
                   firstPhoto.thumbnailFileId ?? firstPhoto.originalFileId,
                 ),

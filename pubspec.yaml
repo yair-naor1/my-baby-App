@@ -39,8 +39,6 @@ dependencies:
   cloud_firestore: ^6.8.0
   image_picker: ^1.2.3
   google_sign_in: ^7.2.0
-  googleapis: ^16.0.0
-  extension_google_sign_in_as_googleapis_auth: ^3.0.0
   image: ^4.9.2
   http: ^1.2.0
   cloud_functions: ^6.3.6
@@ -48,6 +46,7 @@ dependencies:
   pdf: ^3.11.3
   printing: ^5.15.0
   flutter_svg: ^2.3.0
+  kosher_dart: ^2.0.20
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -61,11 +61,12 @@ class AlbumLayoutBuilder {
     return pages;
   }
 
-  /// Whether this album's content is Hebrew — nothing in the app currently
-  /// sets [Book.language] to anything but 'en' (see BookRepository.createBook),
-  /// so language detection has to look at the actual text instead of trusting
-  /// that field. If any real content is Hebrew, the whole album reads RTL —
-  /// a book isn't meaningfully "a little bit RTL".
+  /// Whether this album's content is Hebrew. [Book.language], set at book
+  /// creation/edit (`BookFormScreen`), is checked first; the content scan
+  /// below stays as a safety net for older books saved before that field was
+  /// settable, or a book whose language wasn't set accurately. If any real
+  /// content is Hebrew, the whole album reads RTL — a book isn't meaningfully
+  /// "a little bit RTL".
   bool detectIsRtl({required Book book, required List<Memory> memories}) {
     if (book.language == 'he') return true;
     if (containsHebrew(book.childName)) return true;

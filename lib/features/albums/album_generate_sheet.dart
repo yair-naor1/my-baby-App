@@ -95,6 +95,12 @@ class _AlbumGenerateSheetContentState
     setState(() => _generatedPages = pages);
   }
 
+  // Deliberately NOT wrapped in Directionality — see the matching note in
+  // album_viewer_screen.dart. The design-preview Cards already get correct
+  // RTL from _isRtl at the AlbumPageWidget level; wrapping this sheet too
+  // would also flip the horizontal design-chip scroller's start side and
+  // scroll direction, an untested layout change beyond the text translation
+  // actually asked for.
   @override
   Widget build(BuildContext context) {
     final pages = _generatedPages;
@@ -115,7 +121,10 @@ class _AlbumGenerateSheetContentState
               ),
             ),
           ),
-          Text('Album', style: Theme.of(context).textTheme.headlineSmall),
+          Text(
+            _isRtl ? 'אלבום' : 'Album',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
           const SizedBox(height: 16),
           Expanded(
             child: SingleChildScrollView(
@@ -136,7 +145,10 @@ class _AlbumGenerateSheetContentState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Choose a design', style: Theme.of(context).textTheme.titleMedium),
+        Text(
+          _isRtl ? 'בחרו עיצוב' : 'Choose a design',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
         const SizedBox(height: 8),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -146,7 +158,7 @@ class _AlbumGenerateSheetContentState
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
-                    label: Text(design.displayName),
+                    label: Text(design.displayName(_isRtl)),
                     selected: _selectedDesign == design,
                     onSelected: (_) =>
                         setState(() => _selectedDesign = design),
@@ -156,7 +168,10 @@ class _AlbumGenerateSheetContentState
           ),
         ),
         const SizedBox(height: 16),
-        Text('Cover', style: Theme.of(context).textTheme.labelLarge),
+        Text(
+          _isRtl ? 'כריכה' : 'Cover',
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
         const SizedBox(height: 8),
         AspectRatio(
           aspectRatio: 0.72,
@@ -175,7 +190,10 @@ class _AlbumGenerateSheetContentState
           ),
         ),
         const SizedBox(height: 16),
-        Text('Sample page', style: Theme.of(context).textTheme.labelLarge),
+        Text(
+          _isRtl ? 'עמוד לדוגמה' : 'Sample page',
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
         const SizedBox(height: 8),
         AspectRatio(
           aspectRatio: 0.72,
@@ -197,7 +215,7 @@ class _AlbumGenerateSheetContentState
         const SizedBox(height: 20),
         FilledButton(
           onPressed: _generate,
-          child: const Text('Generate Album'),
+          child: Text(_isRtl ? 'צרו אלבום' : 'Generate Album'),
         ),
       ],
     );
@@ -208,14 +226,17 @@ class _AlbumGenerateSheetContentState
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '${pages.length} pages',
+          _isRtl ? '${pages.length} עמודים' : '${pages.length} pages',
           style: Theme.of(context).textTheme.titleLarge,
         ),
         const SizedBox(height: 8),
         Text(
-          "Printing options are coming soon — you'll be able to see "
-          'recommended page size, margins, and how to print or order a '
-          'copy from here.',
+          _isRtl
+              ? 'אפשרויות הדפסה יגיעו בקרוב — תוכלו לראות כאן גודל עמוד '
+                    'מומלץ, שוליים, וכיצד להדפיס או להזמין עותק.'
+              : "Printing options are coming soon — you'll be able to see "
+                    'recommended page size, margins, and how to print or order a '
+                    'copy from here.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
             color: Theme.of(context).colorScheme.outline,
           ),
@@ -237,12 +258,12 @@ class _AlbumGenerateSheetContentState
               ),
             );
           },
-          child: const Text('View Album'),
+          child: Text(_isRtl ? 'צפייה באלבום' : 'View Album'),
         ),
         const SizedBox(height: 8),
         TextButton(
           onPressed: () => setState(() => _generatedPages = null),
-          child: const Text('Choose a different design'),
+          child: Text(_isRtl ? 'בחרו עיצוב אחר' : 'Choose a different design'),
         ),
       ],
     );

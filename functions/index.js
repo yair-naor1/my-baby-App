@@ -5,6 +5,14 @@ admin.initializeApp();
 
 exports.sendBookReminders = require("./notifications").sendBookReminders;
 
+// PRODUCT_SPEC.md §9.3: R2 photo storage signing backend.
+exports.getPhotoUploadUrls = require("./r2Storage").getPhotoUploadUrls;
+exports.getPhotoDownloadUrl = require("./r2Storage").getPhotoDownloadUrl;
+exports.deletePhotos = require("./r2Storage").deletePhotos;
+
+// PRODUCT_SPEC.md §11: co-parent book sharing.
+exports.joinBook = require("./bookSharing").joinBook;
+
 // Set by Firebase at deploy/runtime for the function's own project.
 const PROJECT_ID = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
 

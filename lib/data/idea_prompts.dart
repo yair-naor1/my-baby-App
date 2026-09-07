@@ -764,3 +764,25 @@ const List<String> ideaCategories = [
   'Health & Hard Moments',
   'Everyday Ordinary',
 ];
+
+/// Hebrew headings for [ideaCategories], keyed by the English string, which
+/// stays the canonical id/key everywhere else (Firestore-free content, so
+/// nothing needs migrating). Same caveat as the prompt translations above —
+/// hand-written, not machine-generated, still worth a native-speaker review
+/// pass.
+const Map<String, String> ideaCategoryTranslations = {
+  'Firsts & Milestones': 'רגעים ראשונים ואבני דרך',
+  'Food': 'אוכל',
+  'Places & Outings': 'מקומות וטיולים',
+  'Funny Moments': 'רגעים מצחיקים',
+  'Personality & Character': 'אישיות ואופי',
+  'Sleep & Daily Routine': 'שינה ושגרת יום',
+  'Sounds, Words & Communication': 'צלילים, מילים ותקשורת',
+  'Growth & Body': 'גדילה והתפתחות',
+  'People & Relationships': 'אנשים וקשרים',
+  'Holidays & Special Dates': 'חגים ותאריכים מיוחדים',
+  'Weather & Seasons': 'מזג אוויר ועונות',
+  "Parent's Corner": 'הפינה של ההורים',
+  'Health & Hard Moments': 'בריאות ורגעים קשים',
+  'Everyday Ordinary': 'יום־יום רגיל',
+};

@@ -18,34 +18,44 @@ class IdeasScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Ideas')),
-      body: ListView.builder(
-        itemCount: ideaCategories.length,
-        itemBuilder: (context, index) {
-          final category = ideaCategories[index];
-          final total = ideaPrompts
-              .where((idea) => idea.category == category)
-              .length;
+    final isHebrew = book.language == 'he';
 
-          return ListTile(
-            title: Text(category),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => _CategoryIdeasScreen(
-                    book: book,
-                    category: category,
-                    bookRepository: bookRepository,
+    return Directionality(
+      textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        appBar: AppBar(title: Text(isHebrew ? 'רעיונות' : 'Ideas')),
+        body: ListView.builder(
+          itemCount: ideaCategories.length,
+          itemBuilder: (context, index) {
+            final category = ideaCategories[index];
+            final total = ideaPrompts
+                .where((idea) => idea.category == category)
+                .length;
+            final categoryLabel = isHebrew
+                ? (ideaCategoryTranslations[category] ?? category)
+                : category;
+
+            return ListTile(
+              title: Text(categoryLabel),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _CategoryIdeasScreen(
+                      book: book,
+                      category: category,
+                      bookRepository: bookRepository,
+                    ),
                   ),
-                ),
-              );
-            },
-            subtitle: Text('$total prompts'),
-          );
-        },
+                );
+              },
+              subtitle: Text(
+                isHebrew ? '$total הצעות' : '$total prompts',
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -130,46 +140,52 @@ class _CategoryIdeasScreenState extends State<_CategoryIdeasScreen> {
   @override
   Widget build(BuildContext context) {
     final isHebrew = widget.book.language == 'he';
+    final categoryLabel = isHebrew
+        ? (ideaCategoryTranslations[widget.category] ?? widget.category)
+        : widget.category;
 
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.category)),
-      body: StreamBuilder<Book?>(
-        stream: _bookStream,
-        initialData: widget.book,
-        builder: (context, snapshot) {
-          final usedIdeaIds = (snapshot.data ?? widget.book).usedIdeaIds;
+    return Directionality(
+      textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        appBar: AppBar(title: Text(categoryLabel)),
+        body: StreamBuilder<Book?>(
+          stream: _bookStream,
+          initialData: widget.book,
+          builder: (context, snapshot) {
+            final usedIdeaIds = (snapshot.data ?? widget.book).usedIdeaIds;
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: _sortedIdeas.length,
-            itemBuilder: (context, index) {
-              final idea = _sortedIdeas[index];
-              final used = usedIdeaIds.contains(idea.id);
-              final text = isHebrew ? idea.textHe : idea.textEn;
-              final outline = Theme.of(context).colorScheme.outline;
+            return ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _sortedIdeas.length,
+              itemBuilder: (context, index) {
+                final idea = _sortedIdeas[index];
+                final used = usedIdeaIds.contains(idea.id);
+                final text = isHebrew ? idea.textHe : idea.textEn;
+                final outline = Theme.of(context).colorScheme.outline;
 
-              return ListTile(
-                title: AnimatedDefaultTextStyle(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeOut,
-                  style:
-                      DefaultTextStyle.of(context).style.merge(
-                        used
-                            ? TextStyle(
-                                color: outline,
-                                decoration: TextDecoration.lineThrough,
-                              )
-                            : const TextStyle(
-                                decoration: TextDecoration.none,
-                              ),
-                      ),
-                  child: Text(text),
-                ),
-                onTap: () => _toggleUsed(idea, !used),
-              );
-            },
-          );
-        },
+                return ListTile(
+                  title: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeOut,
+                    style:
+                        DefaultTextStyle.of(context).style.merge(
+                          used
+                              ? TextStyle(
+                                  color: outline,
+                                  decoration: TextDecoration.lineThrough,
+                                )
+                              : const TextStyle(
+                                  decoration: TextDecoration.none,
+                                ),
+                        ),
+                    child: Text(text),
+                  ),
+                  onTap: () => _toggleUsed(idea, !used),
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }

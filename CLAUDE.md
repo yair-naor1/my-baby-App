@@ -55,7 +55,9 @@ photos visible → edit → delete safely.
 
 ## Immediate known issue
 
-Google account persistence. The user must not be prompted to pick a Google account on
-every launch. Silent restoration is partly implemented; there was an analyzer error
-around `.email` on a nullable restored account. Inspect the current state of
-`GoogleDriveService` before rewriting anything.
+None open right now. Google Sign-In is confirmed working end-to-end on-device as of
+2026-09-07 (see `docs/PRODUCT_SPEC.md` §20) — identity-only now, backed by
+`GoogleAuthService`, no Drive consent screen. If a `PROVIDER_ALREADY_LINKED` error ever
+reappears on a test account, check `firebase auth:export` for a mismatched linked
+provider before assuming it's a code bug — that was the actual cause last time, not
+the sign-in logic itself.
