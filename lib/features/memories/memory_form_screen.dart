@@ -4,6 +4,7 @@ import '../../data/repositories/memory_repository.dart';
 import '../../data/services/memory_service.dart';
 import '../../models/memory.dart';
 import 'dart:io';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import '../../models/photo_reference.dart';
 import '../../services/ai_text_enhancement_service.dart';
@@ -30,6 +31,12 @@ class MemoryFormScreen extends StatefulWidget {
   /// *shown* here, never the date picker itself.
   final String dateDisplay;
 
+  /// The owning book's language preference (spec §7.1/§13) — 'en' or 'he'.
+  /// Drives every piece of this screen's own chrome (labels, buttons,
+  /// dialogs); never applied to the memory text itself, which the parent
+  /// writes in whatever language they choose.
+  final String language;
+
   const MemoryFormScreen({
     super.key,
     required this.bookId,
@@ -37,6 +44,7 @@ class MemoryFormScreen extends StatefulWidget {
     this.memoryService,
     this.childGender,
     this.dateDisplay = 'gregorian',
+    this.language = 'en',
   });
 
   bool get isEditing => memory != null;
@@ -68,6 +76,8 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
   bool _isLoading = false;
   String? _uploadProgressText;
   String? _errorMessage;
+
+  bool get _isHebrew => widget.language == 'he';
 
   @override
   void initState() {
@@ -112,28 +122,32 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Unsaved changes'),
-          content: const Text(
-            'You have unsaved changes. Are you sure you want to exit?',
+          title: Text(_isHebrew ? 'שינויים שלא נשמרו' : 'Unsaved changes'),
+          content: Text(
+            _isHebrew
+                ? 'יש לכם שינויים שלא נשמרו. האם אתם בטוחים שברצונכם לצאת?'
+                : 'You have unsaved changes. Are you sure you want to exit?',
           ),
           actions: [
             TextButton(
               onPressed: () {
                 Navigator.pop(context, _ExitChoice.keepEditing);
               },
-              child: const Text('Keep Editing'),
+              child: Text(_isHebrew ? 'המשך עריכה' : 'Keep Editing'),
             ),
             TextButton(
               onPressed: () {
                 Navigator.pop(context, _ExitChoice.exitWithoutSaving);
               },
-              child: const Text('Exit Without Saving'),
+              child: Text(
+                _isHebrew ? 'יציאה ללא שמירה' : 'Exit Without Saving',
+              ),
             ),
             FilledButton(
               onPressed: () {
                 Navigator.pop(context, _ExitChoice.saveAndExit);
               },
-              child: const Text('Save and Exit'),
+              child: Text(_isHebrew ? 'שמירה ויציאה' : 'Save and Exit'),
             ),
           ],
         );
@@ -214,9 +228,112 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
 
     if (photos.isEmpty) return;
 
+    // Only worth reading EXIF off the first photo of the memory: once a
+    // date is already set (picked by the user, loaded from an existing
+    // memory, or accepted from an earlier photo), later adds must never
+    // move the memory's date, silently or otherwise.
+    final shouldInferDate =
+        _memoryDate == null && _newPhotos.isEmpty && _existingPhotos.isEmpty;
+
+    final inferredDate = shouldInferDate
+        ? await _photoCapturedDate(photos.first)
+        : null;
+
+    if (!mounted) return;
+
     setState(() {
       _newPhotos.addAll(photos);
     });
+
+    if (inferredDate == null) return;
+
+    final useInferredDate = await _confirmInferredDate(inferredDate);
+
+    if (useInferredDate && mounted) {
+      setState(() {
+        _memoryDate = inferredDate;
+      });
+    }
+  }
+
+  /// Asks before applying a date read from a photo's EXIF data — never
+  /// silent, since a photo pulled from the gallery for a memory written
+  /// today (or the outlier in a freshly-taken batch) would otherwise set
+  /// the wrong date with no visible cause.
+  Future<bool> _confirmInferredDate(DateTime date) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(_isHebrew ? 'להשתמש בתאריך התמונה?' : 'Use photo date?'),
+          content: Text(
+            _isHebrew
+                ? 'התמונה צולמה בתאריך '
+                      '${formatDate(date, widget.dateDisplay)}. להשתמש בתאריך '
+                      'זה עבור הזיכרון?'
+                : 'This photo was taken on ${formatDate(date, widget.dateDisplay)}. '
+                      'Use this date for the memory?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(_isHebrew ? 'לא, השאירו היום' : 'No, keep today'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(
+                _isHebrew ? 'השתמשו בתאריך התמונה' : 'Use photo date',
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    return confirmed ?? false;
+  }
+
+  /// Reads the EXIF capture date off a picked photo, spec-free: falls back
+  /// silently to null (leaving the memory's date to default to today, same
+  /// as before this existed) for screenshots, downloaded images, or any
+  /// photo missing/malformed EXIF data. Clamped to "not in the future"
+  /// since [_selectDate]'s picker caps at `DateTime.now()` — a bad camera
+  /// clock must never leave `_memoryDate` in a state that picker can't open.
+  Future<DateTime?> _photoCapturedDate(XFile file) async {
+    try {
+      final bytes = await file.readAsBytes();
+      final decoded = img.decodeImage(bytes);
+
+      if (decoded == null) return null;
+
+      final exif = decoded.exif;
+      final raw =
+          exif.exifIfd['DateTimeOriginal']?.toString() ??
+          exif.imageIfd['DateTime']?.toString();
+
+      if (raw == null) return null;
+
+      final match = RegExp(
+        r'^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})',
+      ).firstMatch(raw);
+
+      if (match == null) return null;
+
+      final captured = DateTime(
+        int.parse(match.group(1)!),
+        int.parse(match.group(2)!),
+        int.parse(match.group(3)!),
+        int.parse(match.group(4)!),
+        int.parse(match.group(5)!),
+        int.parse(match.group(6)!),
+      );
+
+      if (captured.isAfter(DateTime.now())) return null;
+
+      return captured;
+    } catch (_) {
+      return null;
+    }
   }
 
   void _openPhotoViewer({
@@ -307,6 +424,7 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
             initialDate: _memoryDate ?? DateTime.now(),
             firstDate: DateTime(1900),
             lastDate: DateTime.now(),
+            isHebrew: _isHebrew,
           );
 
     if (selectedDate != null) {
@@ -335,6 +453,7 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
         originalText: text,
         childGender: widget.childGender,
         service: _aiTextEnhancementService,
+        isHebrew: _isHebrew,
       ),
     );
 
@@ -350,7 +469,9 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
 
     if (text.isEmpty && _newPhotos.isEmpty && _existingPhotos.isEmpty) {
       setState(() {
-        _errorMessage = 'Add some text or at least one photo';
+        _errorMessage = _isHebrew
+            ? 'יש להוסיף טקסט או לפחות תמונה אחת'
+            : 'Add some text or at least one photo';
       });
       return false;
     }
@@ -373,7 +494,9 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
           if (!mounted || total <= 1) return;
 
           setState(() {
-            _uploadProgressText = 'Uploading photo $uploaded of $total…';
+            _uploadProgressText = _isHebrew
+                ? 'מעלה תמונה $uploaded מתוך $total…'
+                : 'Uploading photo $uploaded of $total…';
           });
         },
       );
@@ -418,154 +541,168 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
 
         await _handleExit();
       },
-      child: Scaffold(
-        appBar: AppBar(title: Text(widget.isEditing ? 'Memory' : 'Add Memory')),
-        body: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            // Show selected photos visually before saving
-            // Put this above the text field:
-            Align(
-              alignment: AlignmentDirectional.centerStart,
-              child: Text(
-                'Photos',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
+      child: Directionality(
+        textDirection: _isHebrew ? TextDirection.rtl : TextDirection.ltr,
+        child: Scaffold(
+          appBar: AppBar(
+            title: Text(
+              widget.isEditing
+                  ? (_isHebrew ? 'זיכרון' : 'Memory')
+                  : (_isHebrew ? 'הוספת זיכרון' : 'Add Memory'),
             ),
-            const SizedBox(height: 8),
-            // One flowing gallery for both already-saved photos and photos
-            // just picked this session — previously these were two separate
-            // lists/rows with two separate full-screen viewers, which read as
-            // "some photos are somewhere else" the moment a memory had both
-            // (found on-device, 2026-09-07). A single Wrap + a single
-            // combined viewer (_openCombinedPhotoViewer) fixes both the
-            // visual split and the swipe-between-photos gap.
-            if (_existingPhotos.isNotEmpty || _newPhotos.isNotEmpty) ...[
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (var index = 0; index < _existingPhotos.length; index++)
-                    _photoThumbnail(
-                      key: ValueKey(
-                        _existingPhotos[index].thumbnailFileId ??
-                            _existingPhotos[index].originalFileId,
+          ),
+          body: ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              // Show selected photos visually before saving
+              // Put this above the text field:
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  _isHebrew ? 'תמונות' : 'Photos',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              const SizedBox(height: 8),
+              // One flowing gallery for both already-saved photos and photos
+              // just picked this session — previously these were two separate
+              // lists/rows with two separate full-screen viewers, which read as
+              // "some photos are somewhere else" the moment a memory had both
+              // (found on-device, 2026-09-07). A single Wrap + a single
+              // combined viewer (_openCombinedPhotoViewer) fixes both the
+              // visual split and the swipe-between-photos gap.
+              if (_existingPhotos.isNotEmpty || _newPhotos.isNotEmpty) ...[
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (var index = 0; index < _existingPhotos.length; index++)
+                      _photoThumbnail(
+                        key: ValueKey(
+                          _existingPhotos[index].thumbnailFileId ??
+                              _existingPhotos[index].originalFileId,
+                        ),
+                        width: _galleryPhotoWidth(_existingPhotos[index]),
+                        image: StoredPhotoImage(
+                          fileId:
+                              _existingPhotos[index].thumbnailFileId ??
+                              _existingPhotos[index].originalFileId,
+                          fit: BoxFit.cover,
+                        ),
+                        onTap: () =>
+                            _openCombinedPhotoViewer(initialIndex: index),
+                        onRemove: _isLoading
+                            ? null
+                            : () => setState(
+                                () => _existingPhotos.removeAt(index),
+                              ),
                       ),
-                      width: _galleryPhotoWidth(_existingPhotos[index]),
-                      image: StoredPhotoImage(
-                        fileId:
-                            _existingPhotos[index].thumbnailFileId ??
-                            _existingPhotos[index].originalFileId,
-                        fit: BoxFit.cover,
+                    for (var index = 0; index < _newPhotos.length; index++)
+                      _photoThumbnail(
+                        key: ValueKey(_newPhotos[index].path),
+                        width: 90,
+                        image: Image.file(
+                          File(_newPhotos[index].path),
+                          fit: BoxFit.cover,
+                        ),
+                        onTap: () => _openCombinedPhotoViewer(
+                          initialIndex: _existingPhotos.length + index,
+                        ),
+                        onRemove: _isLoading
+                            ? null
+                            : () => setState(() => _newPhotos.removeAt(index)),
                       ),
-                      onTap: () =>
-                          _openCombinedPhotoViewer(initialIndex: index),
-                      onRemove: _isLoading
-                          ? null
-                          : () => setState(
-                              () => _existingPhotos.removeAt(index),
-                            ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              OutlinedButton.icon(
+                onPressed: _isLoading ? null : _pickPhotos,
+                icon: const Icon(Icons.add_photo_alternate),
+                label: Text(_isHebrew ? 'הוספת תמונות' : 'Add Photos'),
+              ),
+
+              const SizedBox(height: 20),
+
+              // So while creating a memory, you can already visually see every newly selected photo.
+              TextField(
+                controller: _textController,
+                maxLines: 5,
+                decoration: InputDecoration(
+                  labelText: _isHebrew ? 'מה קרה?' : 'What happened?',
+                  alignLabelWithHint: true,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _textController,
+                  builder: (context, value, _) {
+                    final canEnhance =
+                        value.text.trim().isNotEmpty && !_isLoading;
+
+                    return TextButton.icon(
+                      onPressed: (canEnhance && !_isEnhancingText)
+                          ? _enhanceText
+                          : null,
+                      icon: _isEnhancingText
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.auto_awesome, size: 18),
+                      label: Text(_isHebrew ? 'שיפור טקסט' : 'Enhance text'),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  _memoryDate == null
+                      ? (_isHebrew ? 'תאריך: היום' : 'Date: Today')
+                      : '${_isHebrew ? 'תאריך' : 'Date'}: '
+                            '${formatDate(_memoryDate!, widget.dateDisplay)}',
+                ),
+                trailing: const Icon(Icons.calendar_today),
+                onTap: _selectDate,
+              ),
+              if (_uploadProgressText != null) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     ),
-                  for (var index = 0; index < _newPhotos.length; index++)
-                    _photoThumbnail(
-                      key: ValueKey(_newPhotos[index].path),
-                      width: 90,
-                      image: Image.file(
-                        File(_newPhotos[index].path),
-                        fit: BoxFit.cover,
-                      ),
-                      onTap: () => _openCombinedPhotoViewer(
-                        initialIndex: _existingPhotos.length + index,
-                      ),
-                      onRemove: _isLoading
-                          ? null
-                          : () => setState(() => _newPhotos.removeAt(index)),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-            ],
-
-            OutlinedButton.icon(
-              onPressed: _isLoading ? null : _pickPhotos,
-              icon: const Icon(Icons.add_photo_alternate),
-              label: const Text('Add Photos'),
-            ),
-
-            const SizedBox(height: 20),
-
-            // So while creating a memory, you can already visually see every newly selected photo.
-            TextField(
-              controller: _textController,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                labelText: 'What happened?',
-                alignLabelWithHint: true,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: AlignmentDirectional.centerEnd,
-              child: ValueListenableBuilder<TextEditingValue>(
-                valueListenable: _textController,
-                builder: (context, value, _) {
-                  final canEnhance =
-                      value.text.trim().isNotEmpty && !_isLoading;
-
-                  return TextButton.icon(
-                    onPressed: (canEnhance && !_isEnhancingText)
-                        ? _enhanceText
-                        : null,
-                    icon: _isEnhancingText
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.auto_awesome, size: 18),
-                    label: const Text('Enhance text'),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 20),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                _memoryDate == null
-                    ? 'Date: Today'
-                    : 'Date: ${formatDate(_memoryDate!, widget.dateDisplay)}',
-              ),
-              trailing: const Icon(Icons.calendar_today),
-              onTap: _selectDate,
-            ),
-            if (_uploadProgressText != null) ...[
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(_uploadProgressText!),
-                ],
+                    const SizedBox(width: 12),
+                    Text(_uploadProgressText!),
+                  ],
+                ),
+              ],
+              if (_errorMessage != null)
+                Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _saveMemory,
+                  child: _isLoading
+                      ? const CircularProgressIndicator()
+                      : Text(
+                          widget.isEditing
+                              ? (_isHebrew ? 'שמירת שינויים' : 'Save Changes')
+                              : (_isHebrew ? 'שמירת זיכרון' : 'Save Memory'),
+                        ),
+                ),
               ),
             ],
-            if (_errorMessage != null)
-              Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _saveMemory,
-                child: _isLoading
-                    ? const CircularProgressIndicator()
-                    : Text(widget.isEditing ? 'Save Changes' : 'Save Memory'),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -582,18 +719,25 @@ class _EnhancePanel extends StatefulWidget {
     required this.originalText,
     required this.childGender,
     required this.service,
+    required this.isHebrew,
   });
 
   final String originalText;
   final String? childGender;
   final AiTextEnhancementService service;
+  final bool isHebrew;
 
   @override
   State<_EnhancePanel> createState() => _EnhancePanelState();
 }
 
 class _EnhancePanelState extends State<_EnhancePanel> {
-  static const _styles = {'short': 'Short', 'warm': 'Warm', 'playful': 'Playful'};
+  static const _styles = {
+    'short': 'Short',
+    'warm': 'Warm',
+    'playful': 'Playful',
+  };
+  static const _stylesHe = {'short': 'קצר', 'warm': 'חם', 'playful': 'משעשע'};
 
   String? _mode;
   String? _style;
@@ -642,7 +786,9 @@ class _EnhancePanelState extends State<_EnhancePanel> {
       setState(() {
         _error = friendlyErrorMessage(
           e,
-          fallback: 'Could not get a suggestion. Please try again.',
+          fallback: widget.isHebrew
+              ? 'לא ניתן היה לקבל הצעה. נסו שוב.'
+              : 'Could not get a suggestion. Please try again.',
         );
       });
     } finally {
@@ -670,7 +816,7 @@ class _EnhancePanelState extends State<_EnhancePanel> {
               children: [
                 Expanded(
                   child: Text(
-                    'AI Editor',
+                    widget.isHebrew ? 'עורך AI' : 'AI Editor',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
@@ -685,7 +831,7 @@ class _EnhancePanelState extends State<_EnhancePanel> {
                 Expanded(
                   child: _ModeButton(
                     icon: Icons.translate,
-                    label: 'Translate',
+                    label: widget.isHebrew ? 'תרגום' : 'Translate',
                     selected: _mode == 'translate',
                     onTap: () => _selectMode('translate'),
                   ),
@@ -694,7 +840,7 @@ class _EnhancePanelState extends State<_EnhancePanel> {
                 Expanded(
                   child: _ModeButton(
                     icon: Icons.auto_awesome,
-                    label: 'Style',
+                    label: widget.isHebrew ? 'סגנון' : 'Style',
                     selected: _mode == 'style',
                     onTap: () => _selectMode('style'),
                   ),
@@ -703,7 +849,7 @@ class _EnhancePanelState extends State<_EnhancePanel> {
                 Expanded(
                   child: _ModeButton(
                     icon: Icons.spellcheck,
-                    label: 'Fix',
+                    label: widget.isHebrew ? 'תיקון' : 'Fix',
                     selected: _mode == 'fix',
                     onTap: () => _selectMode('fix'),
                   ),
@@ -714,7 +860,7 @@ class _EnhancePanelState extends State<_EnhancePanel> {
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
-                children: _styles.entries
+                children: (widget.isHebrew ? _stylesHe : _styles).entries
                     .map(
                       (entry) => ChoiceChip(
                         label: Text(entry.value),
@@ -743,7 +889,10 @@ class _EnhancePanelState extends State<_EnhancePanel> {
                 child: Text(_error!, style: const TextStyle(color: Colors.red)),
               )
             else if (_result != null) ...[
-              Text('Result', style: Theme.of(context).textTheme.titleSmall),
+              Text(
+                widget.isHebrew ? 'תוצאה' : 'Result',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
               const SizedBox(height: 8),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 200),
@@ -753,7 +902,9 @@ class _EnhancePanelState extends State<_EnhancePanel> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 24),
                 child: Text(
-                  'Pick an option above to see a suggestion.',
+                  widget.isHebrew
+                      ? 'בחרו אפשרות למעלה כדי לראות הצעה.'
+                      : 'Pick an option above to see a suggestion.',
                   style: TextStyle(color: colorScheme.outline),
                 ),
               ),
@@ -764,7 +915,7 @@ class _EnhancePanelState extends State<_EnhancePanel> {
                 onPressed: _result == null
                     ? null
                     : () => Navigator.pop(context, _result),
-                child: const Text('Apply'),
+                child: Text(widget.isHebrew ? 'החלה' : 'Apply'),
               ),
             ),
           ],

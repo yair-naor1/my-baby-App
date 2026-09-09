@@ -69,6 +69,8 @@ class NotificationService {
         builder: (_) => MemoryFormScreen(
           bookId: book.bookId,
           childGender: book.childGender,
+          dateDisplay: book.dateDisplay,
+          language: book.language,
         ),
       ),
     );

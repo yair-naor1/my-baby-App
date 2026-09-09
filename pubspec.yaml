@@ -47,6 +47,7 @@ dependencies:
   printing: ^5.15.0
   flutter_svg: ^2.3.0
   kosher_dart: ^2.0.20
+  share_plus: ^13.3.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

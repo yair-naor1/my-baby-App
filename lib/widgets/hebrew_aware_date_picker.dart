@@ -14,6 +14,7 @@ Future<DateTime?> showDatePickerWithHebrew({
   required DateTime initialDate,
   required DateTime firstDate,
   required DateTime lastDate,
+  bool isHebrew = false,
 }) {
   return showDialog<DateTime>(
     context: context,
@@ -21,6 +22,7 @@ Future<DateTime?> showDatePickerWithHebrew({
       initialDate: initialDate,
       firstDate: firstDate,
       lastDate: lastDate,
+      isHebrew: isHebrew,
     ),
   );
 }
@@ -30,11 +32,13 @@ class _HebrewAwareDatePickerDialog extends StatefulWidget {
     required this.initialDate,
     required this.firstDate,
     required this.lastDate,
+    required this.isHebrew,
   });
 
   final DateTime initialDate;
   final DateTime firstDate;
   final DateTime lastDate;
+  final bool isHebrew;
 
   @override
   State<_HebrewAwareDatePickerDialog> createState() =>
@@ -78,11 +82,11 @@ class _HebrewAwareDatePickerDialogState
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
+                    child: Text(widget.isHebrew ? 'ביטול' : 'Cancel'),
                   ),
                   TextButton(
                     onPressed: () => Navigator.pop(context, _selected),
-                    child: const Text('OK'),
+                    child: Text(widget.isHebrew ? 'אישור' : 'OK'),
                   ),
                 ],
               ),

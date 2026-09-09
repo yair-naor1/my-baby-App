@@ -60,6 +60,11 @@ class _BookFormScreenState extends State<BookFormScreen> {
   String? _uploadProgressText;
   String? _errorMessage;
 
+  // Reflects the language chip currently selected in this very form — not
+  // widget.book.language — so switching the chip flips this screen's own
+  // labels immediately, before the change is even saved.
+  bool get _isHebrew => _language == 'he';
+
   late final String _initialChildName;
   late final DateTime? _initialBirthDate;
 
@@ -162,24 +167,27 @@ class _BookFormScreenState extends State<BookFormScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Unsaved changes'),
-          content: const Text(
-            'You have unsaved changes. Are you sure you want to exit?',
+          title: Text(_isHebrew ? 'שינויים שלא נשמרו' : 'Unsaved changes'),
+          content: Text(
+            _isHebrew
+                ? 'יש לכם שינויים שלא נשמרו. האם אתם בטוחים שברצונכם לצאת?'
+                : 'You have unsaved changes. Are you sure you want to exit?',
           ),
           actions: [
             TextButton(
-              onPressed: () =>
-                  Navigator.pop(context, _ExitChoice.keepEditing),
-              child: const Text('Keep Editing'),
+              onPressed: () => Navigator.pop(context, _ExitChoice.keepEditing),
+              child: Text(_isHebrew ? 'המשך עריכה' : 'Keep Editing'),
             ),
             TextButton(
               onPressed: () =>
                   Navigator.pop(context, _ExitChoice.exitWithoutSaving),
-              child: const Text('Exit Without Saving'),
+              child: Text(
+                _isHebrew ? 'יציאה ללא שמירה' : 'Exit Without Saving',
+              ),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, _ExitChoice.saveAndExit),
-              child: const Text('Save and Exit'),
+              child: Text(_isHebrew ? 'שמירה ויציאה' : 'Save and Exit'),
             ),
           ],
         );
@@ -225,6 +233,7 @@ class _BookFormScreenState extends State<BookFormScreen> {
             initialDate: _birthDate ?? DateTime.now(),
             firstDate: DateTime(2000),
             lastDate: DateTime.now(),
+            isHebrew: _isHebrew,
           );
 
     if (selectedDate != null) {
@@ -264,7 +273,11 @@ class _BookFormScreenState extends State<BookFormScreen> {
     final childName = _childNameController.text.trim();
 
     if (childName.isEmpty || _birthDate == null) {
-      setState(() => _errorMessage = 'Please enter a name and birth date');
+      setState(
+        () => _errorMessage = _isHebrew
+            ? 'יש להזין שם ותאריך לידה'
+            : 'Please enter a name and birth date',
+      );
       return false;
     }
 
@@ -297,7 +310,9 @@ class _BookFormScreenState extends State<BookFormScreen> {
           if (!mounted || total <= 1) return;
 
           setState(() {
-            _uploadProgressText = 'Uploading photo $uploaded of $total…';
+            _uploadProgressText = _isHebrew
+                ? 'מעלה תמונה $uploaded מתוך $total…'
+                : 'Uploading photo $uploaded of $total…';
           });
         },
       );
@@ -356,7 +371,7 @@ class _BookFormScreenState extends State<BookFormScreen> {
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
-                'Cover',
+                _isHebrew ? 'שער' : 'Cover',
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.onPrimary,
                   fontSize: 11,
@@ -370,7 +385,7 @@ class _BookFormScreenState extends State<BookFormScreen> {
             bottom: 2,
             child: IconButton(
               visualDensity: VisualDensity.compact,
-              tooltip: 'Set as cover',
+              tooltip: _isHebrew ? 'הגדרה כתמונת שער' : 'Set as cover',
               onPressed: () => setState(() => _coverKey = key),
               icon: const Icon(Icons.star_border, color: Colors.white),
             ),
@@ -396,224 +411,267 @@ class _BookFormScreenState extends State<BookFormScreen> {
         if (didPop) return;
         await _handleExit();
       },
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(widget.isEditing ? 'Edit Book Info' : 'Create Book'),
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            TextField(
-              controller: _childNameController,
-              decoration: const InputDecoration(labelText: "Child's name"),
+      child: Directionality(
+        textDirection: _isHebrew ? TextDirection.rtl : TextDirection.ltr,
+        child: Scaffold(
+          appBar: AppBar(
+            title: Text(
+              widget.isEditing
+                  ? (_isHebrew ? 'עריכת פרטי הספר' : 'Edit Book Info')
+                  : (_isHebrew ? 'יצירת ספר' : 'Create Book'),
             ),
-            const SizedBox(height: 16),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                _birthDate == null
-                    ? 'Select birth date'
-                    : formatDate(_birthDate!, _dateDisplay),
-              ),
-              trailing: const Icon(Icons.calendar_today),
-              onTap: _selectBirthDate,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Language for Ideas prompts and the generated album.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                ChoiceChip(
-                  label: const Text('English'),
-                  selected: _language == 'en',
-                  onSelected: (selected) {
-                    if (selected) setState(() => _language = 'en');
-                  },
+          ),
+          body: ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              TextField(
+                controller: _childNameController,
+                decoration: InputDecoration(
+                  labelText: _isHebrew ? "שם הילד/ה" : "Child's name",
                 ),
-                ChoiceChip(
-                  label: const Text('עברית'),
-                  selected: _language == 'he',
-                  onSelected: (selected) {
-                    if (selected) setState(() => _language = 'he');
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              initialValue: _dateDisplay,
-              decoration: const InputDecoration(labelText: 'Which date to show'),
-              items: const [
-                DropdownMenuItem(value: 'gregorian', child: Text('English')),
-                DropdownMenuItem(value: 'hebrew', child: Text('Hebrew')),
-                DropdownMenuItem(value: 'both', child: Text('Both')),
-              ],
-              onChanged: (value) {
-                if (value != null) setState(() => _dateDisplay = value);
-              },
-            ),
-            const Divider(height: 32),
-            Text(
-              'The following are optional — add what you\'d like.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _birthPlaceController,
-              decoration: const InputDecoration(labelText: 'Birth place'),
-            ),
-            const SizedBox(height: 16),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                _birthTime == null
-                    ? 'Birth time'
-                    : 'Birth time: ${_formatTime(_birthTime!)}',
               ),
-              trailing: const Icon(Icons.access_time),
-              onTap: _selectBirthTime,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Gender — only used to get Hebrew grammar right when writing '
-              'about your child.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                ChoiceChip(
-                  label: const Text('Boy'),
-                  selected: _childGender == 'male',
-                  onSelected: (selected) => setState(
-                    () => _childGender = selected ? 'male' : null,
-                  ),
+              const SizedBox(height: 16),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  _birthDate == null
+                      ? (_isHebrew ? 'בחירת תאריך לידה' : 'Select birth date')
+                      : formatDate(_birthDate!, _dateDisplay),
                 ),
-                ChoiceChip(
-                  label: const Text('Girl'),
-                  selected: _childGender == 'female',
-                  onSelected: (selected) => setState(
-                    () => _childGender = selected ? 'female' : null,
-                  ),
-                ),
-                ChoiceChip(
-                  label: const Text('Prefer not to say'),
-                  selected: _childGender == null,
-                  onSelected: (selected) =>
-                      setState(() => _childGender = null),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _birthWeightController,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
+                trailing: const Icon(Icons.calendar_today),
+                onTap: _selectBirthDate,
               ),
-              decoration: const InputDecoration(labelText: 'Weight (kg)'),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _birthStoryController,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                labelText: 'Birth story',
-                alignLabelWithHint: true,
+              const SizedBox(height: 16),
+              Text(
+                _isHebrew ? 'שפה מועדפת' : 'Preferred language',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
-            ),
-            const SizedBox(height: 24),
-            Align(
-              alignment: AlignmentDirectional.centerStart,
-              child: Text(
-                'Birth / hospital photos',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Tap the star on a photo to make it the cover shown for this '
-              'book.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ..._existingBirthPhotos.map((photo) {
-                  final imageId = photo.thumbnailFileId ?? photo.originalFileId;
-
-                  return _photoThumbnail(
-                    key: photo.originalFileId,
-                    image: StoredPhotoImage(
-                      key: ValueKey(imageId),
-                      fileId: imageId,
-                      fit: BoxFit.cover,
-                    ),
-                    onRemove: () {
-                      setState(() {
-                        _existingBirthPhotos.remove(photo);
-                        if (_coverKey == photo.originalFileId) {
-                          _coverKey = null;
-                        }
-                      });
-                    },
-                  );
-                }),
-                ..._newBirthPhotos.map((photo) {
-                  return _photoThumbnail(
-                    key: photo.path,
-                    image: Image.file(File(photo.path), fit: BoxFit.cover),
-                    onRemove: () {
-                      setState(() {
-                        _newBirthPhotos.remove(photo);
-                        if (_coverKey == photo.path) _coverKey = null;
-                      });
-                    },
-                  );
-                }),
-              ],
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _isLoading ? null : _pickPhotos,
-              icon: const Icon(Icons.add_photo_alternate),
-              label: const Text('Add Photos'),
-            ),
-            if (_uploadProgressText != null) ...[
-              const SizedBox(height: 12),
-              Row(
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
                 children: [
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ChoiceChip(
+                    label: const Text('English'),
+                    selected: _language == 'en',
+                    onSelected: (selected) {
+                      if (selected) setState(() => _language = 'en');
+                    },
                   ),
-                  const SizedBox(width: 12),
-                  Text(_uploadProgressText!),
+                  ChoiceChip(
+                    label: const Text('עברית'),
+                    selected: _language == 'he',
+                    onSelected: (selected) {
+                      if (selected) setState(() => _language = 'he');
+                    },
+                  ),
                 ],
               ),
-            ],
-            if (_errorMessage != null) ...[
-              const SizedBox(height: 12),
-              Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
-            ],
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _save,
-                child: _isLoading
-                    ? const CircularProgressIndicator()
-                    : Text(widget.isEditing ? 'Save Changes' : 'Create Book'),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                initialValue: _dateDisplay,
+                decoration: InputDecoration(
+                  labelText: _isHebrew
+                      ? 'איזה תאריך להציג'
+                      : 'Which date to show',
+                ),
+                items: [
+                  DropdownMenuItem(
+                    value: 'gregorian',
+                    child: Text(_isHebrew ? 'לועזי' : 'Gregorian'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'hebrew',
+                    child: Text(_isHebrew ? 'עברי' : 'Hebrew'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'both',
+                    child: Text(_isHebrew ? 'שניהם' : 'Both'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) setState(() => _dateDisplay = value);
+                },
               ),
-            ),
-          ],
+              const Divider(height: 32),
+              Text(
+                _isHebrew
+                    ? 'הפרטים הבאים הם אופציונליים — הוסיפו את מה שתרצו.'
+                    : 'The following are optional — add what you\'d like.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _birthPlaceController,
+                decoration: InputDecoration(
+                  labelText: _isHebrew ? 'מקום לידה' : 'Birth place',
+                ),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  _birthTime == null
+                      ? (_isHebrew ? 'שעת לידה' : 'Birth time')
+                      : '${_isHebrew ? 'שעת לידה' : 'Birth time'}: '
+                            '${_formatTime(_birthTime!)}',
+                ),
+                trailing: const Icon(Icons.access_time),
+                onTap: _selectBirthTime,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _isHebrew
+                    ? 'מגדר — משמש רק כדי לכתוב נכון מבחינה דקדוקית בעברית על '
+                          'הילד/ה שלכם.'
+                    : 'Gender — only used to get Hebrew grammar right when writing '
+                          'about your child.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: Text(_isHebrew ? 'בן' : 'Boy'),
+                    selected: _childGender == 'male',
+                    onSelected: (selected) =>
+                        setState(() => _childGender = selected ? 'male' : null),
+                  ),
+                  ChoiceChip(
+                    label: Text(_isHebrew ? 'בת' : 'Girl'),
+                    selected: _childGender == 'female',
+                    onSelected: (selected) => setState(
+                      () => _childGender = selected ? 'female' : null,
+                    ),
+                  ),
+                  ChoiceChip(
+                    label: Text(
+                      _isHebrew ? 'מעדיפים לא לציין' : 'Prefer not to say',
+                    ),
+                    selected: _childGender == null,
+                    onSelected: (selected) =>
+                        setState(() => _childGender = null),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _birthWeightController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: _isHebrew ? 'משקל (ק"ג)' : 'Weight (kg)',
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _birthStoryController,
+                maxLines: 5,
+                decoration: InputDecoration(
+                  labelText: _isHebrew ? 'סיפור הלידה' : 'Birth story',
+                  alignLabelWithHint: true,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  _isHebrew
+                      ? 'תמונות לידה / בית חולים'
+                      : 'Birth / hospital photos',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _isHebrew
+                    ? 'הקישו על הכוכב בתמונה כדי להפוך אותה לתמונת השער של '
+                          'הספר.'
+                    : 'Tap the star on a photo to make it the cover shown for this '
+                          'book.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ..._existingBirthPhotos.map((photo) {
+                    final imageId =
+                        photo.thumbnailFileId ?? photo.originalFileId;
+
+                    return _photoThumbnail(
+                      key: photo.originalFileId,
+                      image: StoredPhotoImage(
+                        key: ValueKey(imageId),
+                        fileId: imageId,
+                        fit: BoxFit.cover,
+                      ),
+                      onRemove: () {
+                        setState(() {
+                          _existingBirthPhotos.remove(photo);
+                          if (_coverKey == photo.originalFileId) {
+                            _coverKey = null;
+                          }
+                        });
+                      },
+                    );
+                  }),
+                  ..._newBirthPhotos.map((photo) {
+                    return _photoThumbnail(
+                      key: photo.path,
+                      image: Image.file(File(photo.path), fit: BoxFit.cover),
+                      onRemove: () {
+                        setState(() {
+                          _newBirthPhotos.remove(photo);
+                          if (_coverKey == photo.path) _coverKey = null;
+                        });
+                      },
+                    );
+                  }),
+                ],
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _isLoading ? null : _pickPhotos,
+                icon: const Icon(Icons.add_photo_alternate),
+                label: Text(_isHebrew ? 'הוספת תמונות' : 'Add Photos'),
+              ),
+              if (_uploadProgressText != null) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(_uploadProgressText!),
+                  ],
+                ),
+              ],
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 12),
+                Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
+              ],
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _save,
+                  child: _isLoading
+                      ? const CircularProgressIndicator()
+                      : Text(
+                          widget.isEditing
+                              ? (_isHebrew ? 'שמירת שינויים' : 'Save Changes')
+                              : (_isHebrew ? 'יצירת ספר' : 'Create Book'),
+                        ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -73,9 +73,13 @@ class _AlbumViewerScreenState extends State<AlbumViewerScreen> {
     }
   }
 
-  void _showComingSoon(String feature) {
+  void _showComingSoon(String feature, {required bool isRtl}) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$feature is coming soon.')),
+      SnackBar(
+        content: Text(
+          isRtl ? '$feature יגיע/תגיע בקרוב.' : '$feature is coming soon.',
+        ),
+      ),
     );
   }
 
@@ -115,7 +119,7 @@ class _AlbumViewerScreenState extends State<AlbumViewerScreen> {
                 if (value == 'export') {
                   _exportPdf();
                 } else if (value == 'share') {
-                  _showComingSoon(isRtl ? 'שיתוף' : 'Sharing');
+                  _showComingSoon(isRtl ? 'השיתוף' : 'Sharing', isRtl: isRtl);
                 }
               },
               itemBuilder: (context) => [

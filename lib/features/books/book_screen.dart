@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:share_plus/share_plus.dart';
 
 import '../../data/repositories/book_repository.dart';
 import '../../data/repositories/memory_repository.dart';
@@ -57,6 +58,12 @@ class _BookScreenState extends State<BookScreen> {
   bool _hasMoreOlderPages = true;
   bool _isLoadingOlder = false;
 
+  // Google Photos-style ordering toggle for the timeline — newest-first by
+  // default, flippable back to the spec's chronological (oldest-first)
+  // order. Local UI state only, not persisted: each open of the book starts
+  // newest-first again.
+  bool _newestFirst = true;
+
   Future<void> _loadOlderMemories(DateTime before) async {
     if (_isLoadingOlder) return;
 
@@ -93,23 +100,25 @@ class _BookScreenState extends State<BookScreen> {
     }
   }
 
-  Future<void> _deleteMemory(Memory memory) async {
+  Future<void> _deleteMemory(Memory memory, {required bool isHebrew}) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Delete memory?'),
-          content: const Text(
-            'This memory will be permanently removed from the book.',
+          title: Text(isHebrew ? 'למחוק את הזיכרון?' : 'Delete memory?'),
+          content: Text(
+            isHebrew
+                ? 'הזיכרון יוסר לצמיתות מהספר.'
+                : 'This memory will be permanently removed from the book.',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
+              child: Text(isHebrew ? 'ביטול' : 'Cancel'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Delete'),
+              child: Text(isHebrew ? 'מחיקה' : 'Delete'),
             ),
           ],
         );
@@ -150,6 +159,7 @@ class _BookScreenState extends State<BookScreen> {
           memoryService: _memoryService,
           childGender: book.childGender,
           dateDisplay: book.dateDisplay,
+          language: book.language,
         ),
       ),
     );
@@ -306,15 +316,17 @@ class _BookScreenState extends State<BookScreen> {
   }
 
   void _showComingSoon(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// Shows this book's share code (spec §11) — its own `bookId`, an
   /// unguessable Firestore auto-id doubling as a non-expiring invite code.
   /// The other parent enters it via Home screen's "Join a Book" action
   /// (`joinBook` Cloud Function, functions/bookSharing.js) to be added to
-  /// `ownerIds`. No native share sheet (would need a new dependency) — copy
-  /// to clipboard and send it however's convenient.
+  /// `ownerIds`. Offers both a plain clipboard copy and the OS share sheet
+  /// (WhatsApp, Messages, email, etc. — whatever's installed) via share_plus.
   Future<void> _shareAlbum(Book book) async {
     final isHebrew = book.language == 'he';
 
@@ -349,6 +361,26 @@ class _BookScreenState extends State<BookScreen> {
               onPressed: () => Navigator.pop(context),
               child: Text(isHebrew ? 'סגירה' : 'Close'),
             ),
+            TextButton.icon(
+              onPressed: () async {
+                final box = context.findRenderObject() as RenderBox?;
+
+                await SharePlus.instance.share(
+                  ShareParams(
+                    text: isHebrew
+                        ? 'הצטרפו לספר של ${book.childName} באפליקציית '
+                              'Baby Book! קוד ההצטרפות: ${book.bookId}'
+                        : "Join ${book.childName}'s book on Baby Book! "
+                              'Use this code: ${book.bookId}',
+                    sharePositionOrigin: box == null
+                        ? null
+                        : box.localToGlobal(Offset.zero) & box.size,
+                  ),
+                );
+              },
+              icon: const Icon(Icons.ios_share),
+              label: Text(isHebrew ? 'שיתוף' : 'Share'),
+            ),
             FilledButton(
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: book.bookId));
@@ -359,9 +391,7 @@ class _BookScreenState extends State<BookScreen> {
 
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(
-                      isHebrew ? 'הקוד הועתק' : 'Code copied',
-                    ),
+                    content: Text(isHebrew ? 'הקוד הועתק' : 'Code copied'),
                   ),
                 );
               },
@@ -385,6 +415,19 @@ class _BookScreenState extends State<BookScreen> {
           appBar: AppBar(
             title: Text(book.childName),
             actions: [
+              IconButton(
+                onPressed: () => setState(() => _newestFirst = !_newestFirst),
+                icon: Icon(
+                  _newestFirst ? Icons.arrow_downward : Icons.arrow_upward,
+                ),
+                tooltip: book.language == 'he'
+                    ? (_newestFirst
+                          ? 'מהחדש לישן — הקישו למיון הפוך'
+                          : 'מהישן לחדש — הקישו למיון הפוך')
+                    : (_newestFirst
+                          ? 'Newest first — tap to reverse'
+                          : 'Oldest first — tap to reverse'),
+              ),
               PopupMenuButton<String>(
                 onSelected: (value) {
                   switch (value) {
@@ -445,16 +488,22 @@ class _BookScreenState extends State<BookScreen> {
                   PopupMenuItem(
                     value: 'edit_info',
                     child: Text(
-                      book.language == 'he' ? 'עריכת פרטי הספר' : 'Edit Book Info',
+                      book.language == 'he'
+                          ? 'עריכת פרטי הספר'
+                          : 'Edit Book Info',
                     ),
                   ),
                   PopupMenuItem(
                     value: 'rename',
-                    child: Text(book.language == 'he' ? 'שינוי שם' : 'Rename Book'),
+                    child: Text(
+                      book.language == 'he' ? 'שינוי שם' : 'Rename Book',
+                    ),
                   ),
                   PopupMenuItem(
                     value: 'delete',
-                    child: Text(book.language == 'he' ? 'מחיקת ספר' : 'Delete Book'),
+                    child: Text(
+                      book.language == 'he' ? 'מחיקת ספר' : 'Delete Book',
+                    ),
                   ),
                 ],
               ),
@@ -477,91 +526,121 @@ class _BookScreenState extends State<BookScreen> {
 
   Widget _buildMemoryList(BuildContext context, Book book) {
     return StreamBuilder<List<Memory>>(
-        stream: _recentStream,
+      stream: _recentStream,
 
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              !snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
+        final isHebrew = book.language == 'he';
 
-          final recent = snapshot.data ?? [];
+        if (snapshot.hasError) {
+          return Center(
+            child: Text(
+              isHebrew
+                  ? 'שגיאה: ${snapshot.error}'
+                  : 'Error: ${snapshot.error}',
+            ),
+          );
+        }
 
-          // The live "recent" page is authoritative for any memory it
-          // contains; a memory only present in a statically-loaded older
-          // page falls back to that copy.
-          final byId = <String, Memory>{
-            for (final memory in _olderMemories) memory.memoryId: memory,
-            for (final memory in recent) memory.memoryId: memory,
-          };
-          final memories = byId.values.toList()
-            ..sort((a, b) => a.memoryDate.compareTo(b.memoryDate));
+        final recent = snapshot.data ?? [];
 
-          if (memories.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.auto_stories_outlined,
-                    size: 48,
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'No memories yet.\nAdd your first memory!',
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            );
-          }
+        // The live "recent" page is authoritative for any memory it
+        // contains; a memory only present in a statically-loaded older
+        // page falls back to that copy. Chronological (oldest-first) is
+        // the canonical order the rest of the app (album, pagination
+        // cursor) relies on — [_newestFirst] only flips the *display*
+        // order, applied last.
+        final byId = <String, Memory>{
+          for (final memory in _olderMemories) memory.memoryId: memory,
+          for (final memory in recent) memory.memoryId: memory,
+        };
+        final memories = byId.values.toList()
+          ..sort((a, b) => a.memoryDate.compareTo(b.memoryDate));
 
-          final showLoadMore = _olderPagesLoaded == 0
-              ? recent.length >= _pageSize
-              : _hasMoreOlderPages;
+        if (memories.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.auto_stories_outlined,
+                  size: 48,
+                  color: Theme.of(context).colorScheme.outline,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  isHebrew
+                      ? 'אין עדיין זיכרונות.\nהוסיפו את הזיכרון הראשון שלכם!'
+                      : 'No memories yet.\nAdd your first memory!',
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          );
+        }
 
-          final itemCount = memories.length + (showLoadMore ? 1 : 0);
+        final showLoadMore = _olderPagesLoaded == 0
+            ? recent.length >= _pageSize
+            : _hasMoreOlderPages;
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: itemCount,
-            itemBuilder: (context, index) {
-              if (showLoadMore && index == 0) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Center(
-                    child: _isLoadingOlder
-                        ? const CircularProgressIndicator()
-                        : TextButton(
-                            onPressed: () =>
-                                _loadOlderMemories(memories.first.memoryDate),
-                            child: const Text('Load earlier memories'),
-                          ),
-                  ),
-                );
-              }
+        final ordered = _newestFirst ? memories.reversed.toList() : memories;
+        final itemCount = ordered.length + (showLoadMore ? 1 : 0);
 
-              final memory = memories[showLoadMore ? index - 1 : index];
+        // "Load earlier memories" always targets the oldest loaded memory
+        // regardless of display order, since it pages further into the
+        // past — so it belongs at whichever end of the list the oldest
+        // memory is currently shown.
+        final loadMoreAtEnd = _newestFirst;
 
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: itemCount,
+          itemBuilder: (context, index) {
+            final isLoadMoreSlot =
+                showLoadMore &&
+                (loadMoreAtEnd ? index == itemCount - 1 : index == 0);
+
+            if (isLoadMoreSlot) {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: _MemoryCard(
-                  key: ValueKey(memory.memoryId),
-                  memory: memory,
-                  dateDisplay: book.dateDisplay,
-                  onTap: () => _openMemory(memory, book),
-                  onDelete: () => _deleteMemory(memory),
+                child: Center(
+                  child: _isLoadingOlder
+                      ? const CircularProgressIndicator()
+                      : TextButton(
+                          onPressed: () =>
+                              _loadOlderMemories(memories.first.memoryDate),
+                          child: Text(
+                            isHebrew
+                                ? 'טעינת זיכרונות ישנים יותר'
+                                : 'Load earlier memories',
+                          ),
+                        ),
                 ),
               );
-            },
-          );
-        },
-      );
+            }
+
+            final memory =
+                ordered[loadMoreAtEnd || !showLoadMore ? index : index - 1];
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _MemoryCard(
+                key: ValueKey(memory.memoryId),
+                memory: memory,
+                dateDisplay: book.dateDisplay,
+                isHebrew: isHebrew,
+                onTap: () => _openMemory(memory, book),
+                onDelete: () => _deleteMemory(memory, isHebrew: isHebrew),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 }
 
@@ -600,6 +679,7 @@ class _MemoryCard extends StatelessWidget {
     super.key,
     required this.memory,
     required this.dateDisplay,
+    required this.isHebrew,
     required this.onTap,
     required this.onDelete,
   });
@@ -609,6 +689,7 @@ class _MemoryCard extends StatelessWidget {
 
   final Memory memory;
   final String dateDisplay;
+  final bool isHebrew;
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
@@ -644,7 +725,9 @@ class _MemoryCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        memory.text.isNotEmpty ? memory.text : 'Photo memory',
+                        memory.text.isNotEmpty
+                            ? memory.text
+                            : (isHebrew ? 'זיכרון עם תמונה' : 'Photo memory'),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: memory.text.isEmpty
@@ -660,7 +743,7 @@ class _MemoryCard extends StatelessWidget {
                 IconButton(
                   onPressed: onDelete,
                   icon: const Icon(Icons.delete_outline),
-                  tooltip: 'Delete memory',
+                  tooltip: isHebrew ? 'מחיקת זיכרון' : 'Delete memory',
                 ),
               ],
             ),
