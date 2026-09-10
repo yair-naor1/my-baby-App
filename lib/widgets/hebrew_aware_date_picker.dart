@@ -51,47 +51,53 @@ class _HebrewAwareDatePickerDialogState
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      child: SizedBox(
-        width: 330,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 4),
-              child: Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: Text(
-                  formatHebrewDate(_selected),
-                  style: Theme.of(context).textTheme.titleMedium,
+    // showDialog uses the root navigator, above any Directionality a caller
+    // might declare — without one here, the Hebrew header would shape
+    // correctly but still align/order itself per the app-wide LTR default.
+    return Directionality(
+      textDirection: widget.isHebrew ? TextDirection.rtl : TextDirection.ltr,
+      child: Dialog(
+        child: SizedBox(
+          width: 330,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 4),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    formatHebrewDate(_selected),
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
               ),
-            ),
-            Flexible(
-              child: CalendarDatePicker(
-                initialDate: _selected,
-                firstDate: widget.firstDate,
-                lastDate: widget.lastDate,
-                onDateChanged: (date) => setState(() => _selected = date),
+              Flexible(
+                child: CalendarDatePicker(
+                  initialDate: _selected,
+                  firstDate: widget.firstDate,
+                  lastDate: widget.lastDate,
+                  onDateChanged: (date) => setState(() => _selected = date),
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(widget.isHebrew ? 'ביטול' : 'Cancel'),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, _selected),
-                    child: Text(widget.isHebrew ? 'אישור' : 'OK'),
-                  ),
-                ],
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text(widget.isHebrew ? 'ביטול' : 'Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, _selected),
+                      child: Text(widget.isHebrew ? 'אישור' : 'OK'),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

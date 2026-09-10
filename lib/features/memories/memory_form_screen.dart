@@ -121,35 +121,42 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
     final choice = await showDialog<_ExitChoice>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: Text(_isHebrew ? 'שינויים שלא נשמרו' : 'Unsaved changes'),
-          content: Text(
-            _isHebrew
-                ? 'יש לכם שינויים שלא נשמרו. האם אתם בטוחים שברצונכם לצאת?'
-                : 'You have unsaved changes. Are you sure you want to exit?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context, _ExitChoice.keepEditing);
-              },
-              child: Text(_isHebrew ? 'המשך עריכה' : 'Keep Editing'),
+        // showDialog uses the root navigator, above this screen's own
+        // Directionality wrapper — without redeclaring it here, Hebrew text
+        // shapes correctly but the paragraph still left-aligns per the
+        // app-wide LTR default.
+        return Directionality(
+          textDirection: _isHebrew ? TextDirection.rtl : TextDirection.ltr,
+          child: AlertDialog(
+            title: Text(_isHebrew ? 'שינויים שלא נשמרו' : 'Unsaved changes'),
+            content: Text(
+              _isHebrew
+                  ? 'יש לכם שינויים שלא נשמרו. האם אתם בטוחים שברצונכם לצאת?'
+                  : 'You have unsaved changes. Are you sure you want to exit?',
             ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context, _ExitChoice.exitWithoutSaving);
-              },
-              child: Text(
-                _isHebrew ? 'יציאה ללא שמירה' : 'Exit Without Saving',
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context, _ExitChoice.keepEditing);
+                },
+                child: Text(_isHebrew ? 'המשך עריכה' : 'Keep Editing'),
               ),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(context, _ExitChoice.saveAndExit);
-              },
-              child: Text(_isHebrew ? 'שמירה ויציאה' : 'Save and Exit'),
-            ),
-          ],
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context, _ExitChoice.exitWithoutSaving);
+                },
+                child: Text(
+                  _isHebrew ? 'יציאה ללא שמירה' : 'Exit Without Saving',
+                ),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(context, _ExitChoice.saveAndExit);
+                },
+                child: Text(_isHebrew ? 'שמירה ויציאה' : 'Save and Exit'),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -264,28 +271,33 @@ class _MemoryFormScreenState extends State<MemoryFormScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: Text(_isHebrew ? 'להשתמש בתאריך התמונה?' : 'Use photo date?'),
-          content: Text(
-            _isHebrew
-                ? 'התמונה צולמה בתאריך '
-                      '${formatDate(date, widget.dateDisplay)}. להשתמש בתאריך '
-                      'זה עבור הזיכרון?'
-                : 'This photo was taken on ${formatDate(date, widget.dateDisplay)}. '
-                      'Use this date for the memory?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(_isHebrew ? 'לא, השאירו היום' : 'No, keep today'),
+        return Directionality(
+          textDirection: _isHebrew ? TextDirection.rtl : TextDirection.ltr,
+          child: AlertDialog(
+            title: Text(
+              _isHebrew ? 'להשתמש בתאריך התמונה?' : 'Use photo date?',
             ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(
-                _isHebrew ? 'השתמשו בתאריך התמונה' : 'Use photo date',
+            content: Text(
+              _isHebrew
+                  ? 'התמונה צולמה בתאריך '
+                        '${formatDate(date, widget.dateDisplay)}. להשתמש בתאריך '
+                        'זה עבור הזיכרון?'
+                  : 'This photo was taken on ${formatDate(date, widget.dateDisplay)}. '
+                        'Use this date for the memory?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(_isHebrew ? 'לא, השאירו היום' : 'No, keep today'),
               ),
-            ),
-          ],
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(
+                  _isHebrew ? 'השתמשו בתאריך התמונה' : 'Use photo date',
+                ),
+              ),
+            ],
+          ),
         );
       },
     );

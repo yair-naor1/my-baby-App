@@ -166,30 +166,40 @@ class _BookFormScreenState extends State<BookFormScreen> {
     final choice = await showDialog<_ExitChoice>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: Text(_isHebrew ? 'שינויים שלא נשמרו' : 'Unsaved changes'),
-          content: Text(
-            _isHebrew
-                ? 'יש לכם שינויים שלא נשמרו. האם אתם בטוחים שברצונכם לצאת?'
-                : 'You have unsaved changes. Are you sure you want to exit?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, _ExitChoice.keepEditing),
-              child: Text(_isHebrew ? 'המשך עריכה' : 'Keep Editing'),
+        // showDialog defaults to the root navigator, which sits above this
+        // screen's own Directionality wrapper — without re-declaring it
+        // here, a Hebrew dialog's text renders left-aligned (the ambient
+        // app-wide LTR default) even though the Hebrew glyphs themselves
+        // still shape correctly.
+        return Directionality(
+          textDirection: _isHebrew ? TextDirection.rtl : TextDirection.ltr,
+          child: AlertDialog(
+            title: Text(_isHebrew ? 'שינויים שלא נשמרו' : 'Unsaved changes'),
+            content: Text(
+              _isHebrew
+                  ? 'יש לכם שינויים שלא נשמרו. האם אתם בטוחים שברצונכם לצאת?'
+                  : 'You have unsaved changes. Are you sure you want to exit?',
             ),
-            TextButton(
-              onPressed: () =>
-                  Navigator.pop(context, _ExitChoice.exitWithoutSaving),
-              child: Text(
-                _isHebrew ? 'יציאה ללא שמירה' : 'Exit Without Saving',
+            actions: [
+              TextButton(
+                onPressed: () =>
+                    Navigator.pop(context, _ExitChoice.keepEditing),
+                child: Text(_isHebrew ? 'המשך עריכה' : 'Keep Editing'),
               ),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, _ExitChoice.saveAndExit),
-              child: Text(_isHebrew ? 'שמירה ויציאה' : 'Save and Exit'),
-            ),
-          ],
+              TextButton(
+                onPressed: () =>
+                    Navigator.pop(context, _ExitChoice.exitWithoutSaving),
+                child: Text(
+                  _isHebrew ? 'יציאה ללא שמירה' : 'Exit Without Saving',
+                ),
+              ),
+              FilledButton(
+                onPressed: () =>
+                    Navigator.pop(context, _ExitChoice.saveAndExit),
+                child: Text(_isHebrew ? 'שמירה ויציאה' : 'Save and Exit'),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -218,6 +228,56 @@ class _BookFormScreenState extends State<BookFormScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) Navigator.of(context).pop();
     });
+  }
+
+  /// Switching language re-renders every screen of this book (never the
+  /// memory text itself) immediately, so for a book that already has
+  /// content, confirm before applying it — a brand-new book being created
+  /// has nothing to "convert" yet, so it switches straight away.
+  Future<void> _selectLanguage(String language) async {
+    if (language == _language) return;
+
+    if (!widget.isEditing) {
+      setState(() => _language = language);
+      return;
+    }
+
+    final switchingToHebrew = language == 'he';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        // See the matching note in _handleExit: showDialog uses the root
+        // navigator, so this needs its own Directionality to actually
+        // right-align rather than just shape Hebrew glyphs inside an
+        // LTR-aligned paragraph.
+        return Directionality(
+          textDirection: _isHebrew ? TextDirection.rtl : TextDirection.ltr,
+          child: AlertDialog(
+            title: Text(_isHebrew ? 'החלפת שפה' : 'Change language'),
+            content: Text(
+              _isHebrew
+                  ? 'כל מסכי הספר הזה (לא הזיכרונות עצמם) יוצגו ב'
+                        '${switchingToHebrew ? 'עברית' : 'אנגלית'}. להמשיך?'
+                  : "All of this book's screens (not the memories themselves) "
+                        'will switch to ${switchingToHebrew ? 'Hebrew' : 'English'}. '
+                        'Continue?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(_isHebrew ? 'ביטול' : 'Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(_isHebrew ? 'החלפה' : 'Switch'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (confirmed == true) setState(() => _language = language);
   }
 
   Future<void> _selectBirthDate() async {
@@ -454,14 +514,14 @@ class _BookFormScreenState extends State<BookFormScreen> {
                     label: const Text('English'),
                     selected: _language == 'en',
                     onSelected: (selected) {
-                      if (selected) setState(() => _language = 'en');
+                      if (selected) _selectLanguage('en');
                     },
                   ),
                   ChoiceChip(
                     label: const Text('עברית'),
                     selected: _language == 'he',
                     onSelected: (selected) {
-                      if (selected) setState(() => _language = 'he');
+                      if (selected) _selectLanguage('he');
                     },
                   ),
                 ],

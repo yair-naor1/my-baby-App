@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:share_plus/share_plus.dart';
 
 import '../../data/repositories/book_repository.dart';
@@ -104,23 +103,30 @@ class _BookScreenState extends State<BookScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: Text(isHebrew ? 'למחוק את הזיכרון?' : 'Delete memory?'),
-          content: Text(
-            isHebrew
-                ? 'הזיכרון יוסר לצמיתות מהספר.'
-                : 'This memory will be permanently removed from the book.',
+        // showDialog uses the root navigator, so it never inherits any
+        // Directionality this screen's own tree might declare — without an
+        // explicit one here, Hebrew text shapes correctly but the
+        // paragraph still aligns to the app-wide LTR default.
+        return Directionality(
+          textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,
+          child: AlertDialog(
+            title: Text(isHebrew ? 'למחוק את הזיכרון?' : 'Delete memory?'),
+            content: Text(
+              isHebrew
+                  ? 'הזיכרון יוסר לצמיתות מהספר.'
+                  : 'This memory will be permanently removed from the book.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(isHebrew ? 'ביטול' : 'Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(isHebrew ? 'מחיקה' : 'Delete'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(isHebrew ? 'ביטול' : 'Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(isHebrew ? 'מחיקה' : 'Delete'),
-            ),
-          ],
         );
       },
     );
@@ -187,34 +193,37 @@ class _BookScreenState extends State<BookScreen> {
       builder: (context) {
         final isHebrew = book.language == 'he';
 
-        return AlertDialog(
-          title: Text(isHebrew ? 'שינוי שם הספר' : 'Rename Book'),
-          content: TextFormField(
-            initialValue: book.childName,
-            autofocus: true,
-            decoration: InputDecoration(
-              labelText: isHebrew ? "שם הילד/ה" : "Child's name",
-            ),
-            onChanged: (value) {
-              editedName = value;
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(isHebrew ? 'ביטול' : 'Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final name = editedName.trim();
-
-                if (name.isNotEmpty) {
-                  Navigator.pop(context, name);
-                }
+        return Directionality(
+          textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,
+          child: AlertDialog(
+            title: Text(isHebrew ? 'שינוי שם הספר' : 'Rename Book'),
+            content: TextFormField(
+              initialValue: book.childName,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: isHebrew ? "שם הילד/ה" : "Child's name",
+              ),
+              onChanged: (value) {
+                editedName = value;
               },
-              child: Text(isHebrew ? 'שמירה' : 'Save'),
             ),
-          ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(isHebrew ? 'ביטול' : 'Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final name = editedName.trim();
+
+                  if (name.isNotEmpty) {
+                    Navigator.pop(context, name);
+                  }
+                },
+                child: Text(isHebrew ? 'שמירה' : 'Save'),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -241,25 +250,28 @@ class _BookScreenState extends State<BookScreen> {
       builder: (context) {
         final isHebrew = book.language == 'he';
 
-        return AlertDialog(
-          title: Text(isHebrew ? 'למחוק את הספר?' : 'Delete book?'),
-          content: Text(
-            isHebrew
-                ? 'למחוק את ${book.childName} ואת כל הזיכרונות בספר הזה?\n\n'
-                      'לא ניתן לבטל פעולה זו.'
-                : 'Delete ${book.childName} and all memories in this book?\n\n'
-                      'This cannot be undone.',
+        return Directionality(
+          textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,
+          child: AlertDialog(
+            title: Text(isHebrew ? 'למחוק את הספר?' : 'Delete book?'),
+            content: Text(
+              isHebrew
+                  ? 'למחוק את ${book.childName} ואת כל הזיכרונות בספר הזה?\n\n'
+                        'לא ניתן לבטל פעולה זו.'
+                  : 'Delete ${book.childName} and all memories in this book?\n\n'
+                        'This cannot be undone.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(isHebrew ? 'ביטול' : 'Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(isHebrew ? 'מחיקה' : 'Delete'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(isHebrew ? 'ביטול' : 'Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(isHebrew ? 'מחיקה' : 'Delete'),
-            ),
-          ],
         );
       },
     );
@@ -321,85 +333,27 @@ class _BookScreenState extends State<BookScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// Shows this book's share code (spec §11) — its own `bookId`, an
-  /// unguessable Firestore auto-id doubling as a non-expiring invite code.
-  /// The other parent enters it via Home screen's "Join a Book" action
-  /// (`joinBook` Cloud Function, functions/bookSharing.js) to be added to
-  /// `ownerIds`. Offers both a plain clipboard copy and the OS share sheet
-  /// (WhatsApp, Messages, email, etc. — whatever's installed) via share_plus.
+  /// Shares this book's share code (spec §11) — its own `bookId`, an
+  /// unguessable Firestore auto-id doubling as a non-expiring invite code —
+  /// straight through the OS share sheet (WhatsApp, Messages, email, etc.)
+  /// via share_plus. Goes directly to the share sheet with no intermediate
+  /// dialog; most share sheets already offer their own "copy" target for
+  /// anyone who wants the code without picking an app.
   Future<void> _shareAlbum(Book book) async {
     final isHebrew = book.language == 'he';
+    final box = context.findRenderObject() as RenderBox?;
 
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(isHebrew ? 'שיתוף האלבום' : 'Share Album'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                isHebrew
-                    ? 'שתפו קוד זה עם ההורה השני. הוא/היא יזינו אותו במסך '
-                          'הבית תחת "הצטרפות לספר" כדי לקבל גישה לספר הזה.'
-                    : 'Share this code with the other parent. They can enter '
-                          'it under "Join a Book" on the Home screen to get '
-                          'access to this book.',
-              ),
-              const SizedBox(height: 16),
-              SelectableText(
-                book.bookId,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(isHebrew ? 'סגירה' : 'Close'),
-            ),
-            TextButton.icon(
-              onPressed: () async {
-                final box = context.findRenderObject() as RenderBox?;
-
-                await SharePlus.instance.share(
-                  ShareParams(
-                    text: isHebrew
-                        ? 'הצטרפו לספר של ${book.childName} באפליקציית '
-                              'Baby Book! קוד ההצטרפות: ${book.bookId}'
-                        : "Join ${book.childName}'s book on Baby Book! "
-                              'Use this code: ${book.bookId}',
-                    sharePositionOrigin: box == null
-                        ? null
-                        : box.localToGlobal(Offset.zero) & box.size,
-                  ),
-                );
-              },
-              icon: const Icon(Icons.ios_share),
-              label: Text(isHebrew ? 'שיתוף' : 'Share'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: book.bookId));
-
-                if (!context.mounted) return;
-
-                Navigator.pop(context);
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(isHebrew ? 'הקוד הועתק' : 'Code copied'),
-                  ),
-                );
-              },
-              child: Text(isHebrew ? 'העתקת קוד' : 'Copy Code'),
-            ),
-          ],
-        );
-      },
+    await SharePlus.instance.share(
+      ShareParams(
+        text: isHebrew
+            ? 'הצטרפו לספר של ${book.childName} באפליקציית '
+                  'Baby Book! קוד ההצטרפות: ${book.bookId}'
+            : "Join ${book.childName}'s book on Baby Book! "
+                  'Use this code: ${book.bookId}',
+        sharePositionOrigin: box == null
+            ? null
+            : box.localToGlobal(Offset.zero) & box.size,
+      ),
     );
   }
 
