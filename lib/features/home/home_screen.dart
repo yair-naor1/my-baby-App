@@ -44,7 +44,7 @@ class _HomeScreenState extends State<HomeScreen> {
         false;
   }
 
-  Future<void> _linkGoogleAccount() async {
+  Future<void> _linkGoogleAccount({required bool isHebrew}) async {
     setState(() {
       _isLinkingGoogle = true;
     });
@@ -59,7 +59,11 @@ class _HomeScreenState extends State<HomeScreen> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Google account linked.')),
+        SnackBar(
+          content: Text(
+            isHebrew ? 'חשבון Google קושר בהצלחה.' : 'Google account linked.',
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -91,35 +95,43 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Prompts for a share code (spec §11 — see book_screen.dart's
   /// "Share Album", which shows the code the other parent enters here) and
-  /// joins that book via the `joinBook` Cloud Function. No book is selected
-  /// yet at this point, so this dialog has no per-book language to follow —
-  /// stays English, unlike the rest of the recently-translated book UI.
-  Future<void> _joinBook() async {
+  /// joins that book via the `joinBook` Cloud Function. [isHebrew] follows
+  /// the same signal the rest of this screen uses (the first book's own
+  /// language) since no book is selected yet at this exact point.
+  Future<void> _joinBook({required bool isHebrew}) async {
     final controller = TextEditingController();
 
     final code = await showDialog<String>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Join a Book'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: 'Share code'),
+        // showDialog uses the root navigator, above any Directionality this
+        // screen might declare — an explicit one here is needed for Hebrew
+        // text to actually right-align, not just shape correctly.
+        return Directionality(
+          textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,
+          child: AlertDialog(
+            title: Text(isHebrew ? 'הצטרפות לספר' : 'Join a Book'),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: isHebrew ? 'קוד הצטרפות' : 'Share code',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(isHebrew ? 'ביטול' : 'Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final trimmed = controller.text.trim();
+                  if (trimmed.isNotEmpty) Navigator.pop(context, trimmed);
+                },
+                child: Text(isHebrew ? 'הצטרפות' : 'Join'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final trimmed = controller.text.trim();
-                if (trimmed.isNotEmpty) Navigator.pop(context, trimmed);
-              },
-              child: const Text('Join'),
-            ),
-          ],
         );
       },
     );
@@ -131,9 +143,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Joined $childName's book!")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isHebrew
+                ? 'הצטרפתם לספר של $childName!'
+                : "Joined $childName's book!",
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
 
@@ -145,114 +163,141 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('My albums'),
-        actions: [
-          IconButton(
-            onPressed: _joinBook,
-            icon: const Icon(Icons.group_add),
-            tooltip: 'Join a Book',
-          ),
-          if (!_isGoogleLinked)
-            IconButton(
-              onPressed: _isLinkingGoogle ? null : _linkGoogleAccount,
-              icon: _isLinkingGoogle
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.link),
-              tooltip: 'Link Google Account',
-            ),
-          IconButton(
-            onPressed: _logout,
-            icon: const Icon(Icons.logout),
-            tooltip: 'Logout',
-          ),
-        ],
-      ),
+    return StreamBuilder<List<Book>>(
+      stream: _booksStream,
+      builder: (context, snapshot) {
+        final books = snapshot.data ?? [];
 
-      body: StreamBuilder<List<Book>>(
-        stream: _booksStream,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+        // No book-independent language preference exists yet (spec §7.1
+        // scopes language per book, not per account) — the first book's own
+        // language is the closest available signal for a screen that lists
+        // every book at once. Falls back to English before any book loads
+        // or exists, matching auth/pre-book screens elsewhere.
+        final isHebrew = books.isNotEmpty && books.first.language == 'he';
 
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-
-          final books = snapshot.data ?? [];
-
-          if (books.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.menu_book_outlined,
-                    size: 48,
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'No books yet.\nCreate your first one!',
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(isHebrew ? 'האלבומים שלי' : 'My albums'),
+            actions: [
+              IconButton(
+                onPressed: () => _joinBook(isHebrew: isHebrew),
+                icon: const Icon(Icons.group_add),
+                tooltip: isHebrew ? 'הצטרפות לספר' : 'Join a Book',
               ),
-            );
-          }
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: books.length,
-            itemBuilder: (context, index) {
-              final book = books[index];
-
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Card(
-                  key: ValueKey(book.bookId),
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    leading: _BookAvatar(book: book),
-                    title: Text(book.childName),
-                    subtitle: Text(
-                      'Born ${formatDate(book.birthDate, book.dateDisplay)}',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => BookScreen(book: book),
-                        ),
-                      );
-                    },
-                  ),
+              if (!_isGoogleLinked)
+                IconButton(
+                  onPressed: _isLinkingGoogle
+                      ? null
+                      : () => _linkGoogleAccount(isHebrew: isHebrew),
+                  icon: _isLinkingGoogle
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.link),
+                  tooltip: isHebrew
+                      ? 'קישור חשבון Google'
+                      : 'Link Google Account',
                 ),
+              IconButton(
+                onPressed: _logout,
+                icon: const Icon(Icons.logout),
+                tooltip: isHebrew ? 'התנתקות' : 'Logout',
+              ),
+            ],
+          ),
+
+          body: Builder(
+            builder: (context) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              if (snapshot.hasError) {
+                return Center(
+                  child: Text(
+                    isHebrew
+                        ? 'שגיאה: ${snapshot.error}'
+                        : 'Error: ${snapshot.error}',
+                  ),
+                );
+              }
+
+              if (books.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.menu_book_outlined,
+                        size: 48,
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        isHebrew
+                            ? 'אין עדיין ספרים.\nצרו את הספר הראשון שלכם!'
+                            : 'No books yet.\nCreate your first one!',
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: books.length,
+                itemBuilder: (context, index) {
+                  final book = books[index];
+                  final bookIsHebrew = book.language == 'he';
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Card(
+                      key: ValueKey(book.bookId),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        leading: _BookAvatar(book: book),
+                        title: Text(book.childName),
+                        subtitle: Text(
+                          bookIsHebrew
+                              ? 'נולד/ה '
+                                    '${formatDate(book.birthDate, book.dateDisplay)}'
+                              : 'Born ${formatDate(book.birthDate, book.dateDisplay)}',
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => BookScreen(book: book),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  );
+                },
               );
             },
-          );
-        },
-      ),
+          ),
 
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const BookFormScreen()),
-          );
-        },
-        child: const Icon(Icons.add),
-      ),
+          floatingActionButton: FloatingActionButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BookFormScreen()),
+              );
+            },
+            child: const Icon(Icons.add),
+          ),
+        );
+      },
     );
   }
 }
