@@ -245,17 +245,22 @@ Also sends an inactivity nudge per book — if more than 3 weeks pass without a 
 memory, a reminder that it's been a while (14-day cooldown between repeat nudges for
 the same book, so it doesn't fire daily once past the threshold).
 
-**Built, not yet deployed or confirmed end-to-end (§20).** `functions/notifications.js`
-(`sendBookReminders`, a daily `onSchedule` Cloud Function) implements both reminder
-types. Client side: `NotificationService` requests permission, registers/refreshes
-the FCM token to `users/{uid}.fcmTokens`, and handles tap-to-open (foreground,
-background, and cold-start via `getInitialMessage`) navigating to Add Memory for the
-book named in the notification's `data.bookId`, using a `navigatorKey` (`lib/
+**Built, deployed 2026-09-07, confirmed end-to-end on-device 2026-09-10 (§20).**
+`functions/notifications.js` (`sendBookReminders`, a daily `onSchedule` Cloud
+Function) implements both reminder types. Client side: `NotificationService`
+requests permission, registers/refreshes the FCM token to
+`users/{uid}.fcmTokens`, and handles tap-to-open (foreground, background, and
+cold-start via `getInitialMessage`) navigating to Add Memory for the book named
+in the notification's `data.bookId` — including that book's `dateDisplay` and
+`language` (added 2026-09-10, alongside §13's language-scope widening) so the
+opened form is correctly localized — using a `navigatorKey` (`lib/
 navigation.dart`) added to `MaterialApp` since notification taps have no
-`BuildContext` of their own. **Not yet done:** deploying the Cloud Function
-(`firebase deploy --only functions` — a deploy is a real-infrastructure action, left
-for explicit user confirmation rather than run automatically), and no on-device
-confirmation yet that a real notification was received and tapped correctly.
+`BuildContext` of their own. Confirmed on the real Nothing-phone test device: a
+push arrives in the system tray while the app is backgrounded, and tapping it
+opens the right book's Add Memory screen. Verified without waiting for a real
+trigger date or running the real scan (which touches every book in the
+project, a shared dev project with more than one real account) — see §20 for
+how.
 
 ---
 
@@ -581,14 +586,27 @@ Hebrew is not a later translation exercise. Build layouts RTL-capable from the s
 
 - UI language: Hebrew or English.
 - **Book language, decided and implemented 2026-09-07 (§7.1):** set per book at
-  creation/edit, separately from device/system UI language. Deliberately scoped
-  narrow — drives the Ideas bank (§7.2, both prompt text and category headings)
-  and the generated album's text direction (§14). **Not** a general app-UI
-  translation system: no `intl`/Flutter-l10n setup exists in this project, and
-  building one (translating every screen's button/label copy, RTL-testing each
-  one) is a separate, materially larger future project, not bundled into this.
-  The rest of the app — Home, Book screen, Add/Edit Memory, book forms — stays
-  English-only UI chrome regardless of a book's language setting.
+  creation/edit, separately from device/system UI language. Drives the Ideas
+  bank (§7.2, both prompt text and category headings), the generated album's
+  text direction (§14), and — **scope widened 2026-09-09** — every screen
+  that belongs to a specific book: Book screen, Add/Edit Memory, and the
+  book creation/edit form, including their dialogs. Switching a book's
+  language re-renders that book's own screens immediately (no restart),
+  never touching the memory text itself. Still **not** a general `intl`/
+  Flutter-l10n setup — each screen has its own inline `isHebrew ? he : en`
+  ternaries, not a resource-bundle system — and still doesn't reach the
+  screens that exist before any one book is selected: auth (Login/Signup/
+  "Continue with Google") stays English by design, since there's no book
+  context yet to draw a language from. Home screen is the one exception to
+  that "no book context yet" reasoning — it now follows the first book's own
+  language (§7.1's per-book model has no account-level language field to
+  read instead), while each book's own row on Home still shows its "Born"
+  line in that book's own language regardless of which book is first.
+  **Also fixed 2026-09-10, same scope:** `showDialog` always attaches to the
+  *root* navigator, above any screen-local `Directionality` — so every one
+  of these dialogs needs its own explicit `Directionality`, or Hebrew text
+  shapes correctly but still paragraph-aligns left (the app-wide LTR
+  default) instead of right.
 - A Hebrew book needs RTL page direction, text, numbering, and layout.
 - Mixed content — Hebrew text with numbers or English — must stay readable and must
   not break layout.
@@ -845,8 +863,19 @@ Already built:
 - Album generation v1 (§14): client-side, no server cost, 3 designs, month-based
   timeline grouping, in-app page-by-page viewer, PDF export via the share sheet
   (`printing` package). Non-editable; see §14 for what's still deferred.
-- Notifications client + backend written (§7.6) — Cloud Function not yet deployed,
-  not yet confirmed end-to-end on a real device.
+- **Notifications (§7.6) — deployed 2026-09-07, confirmed end-to-end on a real
+  device 2026-09-10.** `sendBookReminders` is a scheduled function (daily 09:00
+  Asia/Jerusalem) that scans every book in the project, so it can't be
+  triggered from the app for testing without risking a real notification to
+  another real owner. Verified instead via a temporary, narrowly-scoped
+  debug-only callable (`sendTestNotification` — sent one push to the calling
+  user's own token(s) for a book they own, deployed, exercised on-device, then
+  deleted; never part of the committed codebase) plus a local, DB-free dry run
+  of the monthly/yearly/inactivity date math. Confirmed on-device: the push
+  arrives in the system tray while the app is backgrounded, and tapping it
+  deep-links straight into that book's Add Memory screen
+  (`NotificationService._handleTap`), fully localized to the book's own
+  language.
 - Google sign-in "account picker every launch" bug — the earlier fix lived in the
   Drive-scoped silent-restore machinery (`GoogleDriveService._connectSlow`) that the
   R2 migration removed entirely (see below): once nothing needs a Drive-scoped
@@ -943,8 +972,9 @@ functions/bookSharing.js
 - **Latest AI Editor panel redesign and Ideas screen tap-animation change are
   built, installed, not yet confirmed on-device.** No Cloud Function redeploy
   needed for this round (only client-side changes).
-- **Sharing between parents (§11) — built 2026-09-07, deployed, not yet
-  confirmed with a real second device/account.** `ownerIds` used to be a
+- **Sharing between parents (§11) — built 2026-09-07, deployed, confirmed
+  end-to-end with a real second device/account by the user (2026-09-10).**
+  `ownerIds` used to be a
   single-element array set once at creation with no way to add a second
   person — Firestore rules already correctly supported multi-owner books
   (array-membership check, not "must equal creator"), but nothing let a
@@ -956,9 +986,9 @@ functions/bookSharing.js
   Admin SDK. **The invite code is the book's own `bookId`** — an unguessable
   Firestore auto-id doubling as a non-expiring share code, no separate code
   generation. Owner side: "Share Album" in the book's ⋮ menu
-  (`book_screen.dart`, `_shareAlbum`) shows the code with a copy-to-clipboard
-  button — no native share sheet, since that would need a new dependency
-  (`share_plus`) for something copy-paste already solves. Joiner side: "Join
+  (`book_screen.dart`, `_shareAlbum`) goes straight to the OS share sheet
+  (WhatsApp, Messages, email, etc.) via `share_plus`, added 2026-09-10 —
+  earlier versions of this feature only offered copy-to-clipboard. Joiner side: "Join
   a Book" on the Home screen AppBar (`home_screen.dart`, `_joinBook`) prompts
   for a code and calls `joinBook`; the shared book then appears in their list
   automatically since `watchMyBooks()` is already a live stream. Once
@@ -1079,9 +1109,10 @@ Storage authorization screens may obviously name the provider when required.
 | Photo storage | Cloudflare R2 — see §9.3. Implemented 2026-09-07. |
 | Album rendering | Client-side, `pdf` package, no server cost — see §14. |
 | Album v1 scope | Non-editable; Generate/Preview merged into one entry — see §14. |
-| Book language scope | Per-book English/Hebrew preference drives Ideas + album direction only, not app-wide UI translation — see §13. Implemented 2026-09-07. |
+| Book language scope | Per-book English/Hebrew preference drives Ideas, album direction, and (as of 2026-09-09) every book-scoped screen's own UI chrome, applied immediately — see §13. Still not a general `intl`/l10n system, and still doesn't reach pre-book screens (auth) other than Home, which follows the first book's language for lack of an account-level field. Implemented 2026-09-07, widened 2026-09-09. |
 | Photo viewer | Full-screen, swipeable, pinch-zoom, full resolution — opened by tapping a photo in Add/Edit Memory. Implemented 2026-09-07. |
-| Book sharing | Invite-by-code (the book's own id), backed by the `joinBook` Cloud Function — see §11. Implemented 2026-09-07; no expiry/revocation/member-list yet. |
+| Book sharing | Invite-by-code (the book's own id), backed by the `joinBook` Cloud Function — see §11. Owner side shares via the OS share sheet (`share_plus`, added 2026-09-10) or clipboard copy. Implemented 2026-09-07, confirmed end-to-end with a real second account 2026-09-10; no expiry/revocation/member-list yet. |
+| Notifications | Scheduled daily Cloud Function (`sendBookReminders`) for monthly/yearly birthday nudges and per-book inactivity nudges — see §7.6. Implemented and deployed 2026-09-07, confirmed end-to-end on-device 2026-09-10. |
 
 ---
 
