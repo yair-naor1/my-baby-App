@@ -39,7 +39,7 @@ If it conflicts with the code, inspect the code first, then update the spec.
 ## Environment notes
 
 - Windows / VS Code / PowerShell. Project at `C:\Baby_App\App_Dev\my_app`.
-- Flutter is on a recent **master channel** build (~3.47.0-1.0.pre, Dart 3.14 dev).
+- Flutter 3.44.9 stable / Dart 3.12.2.
   If a plugin behaves strangely, check the channel before blaming app code.
 - Test device: Nothing phone, appears as `A001`.
 - Git push fails on the corporate VPN. Disconnect the VPN — it is not a repo problem.
